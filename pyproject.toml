@@ -1,0 +1,27 @@
+[project]
+name = "Scene-Physics"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "jwdase",email = "jwdase@mit.edu"}
+]
+readme = "README.md"
+requires-python = ">=3.11 <3.14"
+dependencies = [
+    "pyvista[all] (>=0.46.3,<0.47.0)",
+    "imageio-ffmpeg (>=0.6.0,<0.7.0)",
+    "tdw (>=1.13.0.0,<2.0.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "black (>=25.9.0,<26.0.0)",
+    "isort (>=7.0.0,<8.0.0)",
+    "pytest (>=8.4.2,<9.0.0)",
+    "jupyter (>=1.1.1,<2.0.0)"
+]

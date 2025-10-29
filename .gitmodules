@@ -1,0 +1,3 @@
+[submodule "src/newton"]
+	path = src/newton
+	url = https://github.com/NVIDIA/newton.git
