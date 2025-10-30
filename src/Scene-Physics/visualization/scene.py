@@ -3,30 +3,45 @@ import time
 
 import pyvista as pv
 
+
 class SceneVisualizer:
-    def __init__(self, recorder, bodies, FPS, camera_position=None, background_color="white"):
+    def __init__(
+        self, recorder, bodies, FPS, camera_position=None, background_color="white"
+    ):
         self.recorder = recorder
         self.bodies = bodies
 
-        self.camera_position = camera_position if camera_position is not None else [
-            (20, 20, 20),
-            (0, 0, 0),
-            (0, 1, 0),
-        ]
+        self.camera_position = (
+            camera_position
+            if camera_position is not None
+            else [
+                (20, 20, 20),
+                (0, 0, 0),
+                (0, 1, 0),
+            ]
+        )
 
         self.background_color = background_color
 
         self.color = self.gen_colors()
         self.FPS = FPS
 
-
     def gen_colors(self):
         num_bodies = len(self.bodies)
 
         colors = [
-            "red", "green", "blue", "white",
-            "black", "yellow", "cyan", "magenta",
-            "lightblue", "darkblue", "brown", "beige"
+            "red",
+            "green",
+            "blue",
+            "white",
+            "black",
+            "yellow",
+            "cyan",
+            "magenta",
+            "lightblue",
+            "darkblue",
+            "brown",
+            "beige",
         ]
 
         return [colors[i % len(colors)] for i in range(num_bodies)]
@@ -48,7 +63,11 @@ class SceneVisualizer:
 
         actors = []
         for i, body in enumerate(self.bodies):
-            actor = plotter.add_mesh(body.to_pyvista(initial_state).copy(), color=self.color[i], smooth_shading=True)
+            actor = plotter.add_mesh(
+                body.to_pyvista(initial_state).copy(),
+                color=self.color[i],
+                smooth_shading=True,
+            )
             actors.append(actor)
 
         plotter.open_movie(output_filename, framerate=self.FPS, quality=9)

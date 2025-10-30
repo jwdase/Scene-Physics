@@ -1,19 +1,23 @@
+import copy
+import time
+
 import warp as wp
+
+from newton._src.utils.recorder import RecorderModelAndState
+from newton.solvers import SolverXPBD, SolverVBD
 import newton
 
-from newton.solvers import SolverXPBD
-
 import numpy as np
-import time
 import pyvista as pv
 
 from properties.material import Material
 from properties.shapes import Sphere, Box, MeshBody, SoftMesh
 from physics.kernels import apply_random_force, apply_random_force_rot
+from visualization.scene import SceneVisualizer
 
 # Simulation constants
-TIME = 10
-FPS = 60
+TIME = 4
+FPS = 240
 DT = 1.0 / (FPS)
 NUM_FRAMES = TIME * FPS
 
@@ -32,87 +36,66 @@ vec6f = wp.types.vector(length=6, dtype=float)
 builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
 
 # Ground Plane
-WoodFloor = Material(mu=0.5, restitution=0.2, contact_ke=2e5, contact_kd=5e3)
+WoodFloor = Material(mu=0.05, restitution=0.1, contact_ke=2e5, contact_kd=5e3)
 builder.add_ground_plane(cfg=WoodFloor.to_cfg(builder))
 
 # Add the balls
-RubberBall = Material(mu=0.8, restitution=1, contact_ke=2e5, contact_kd=5e3) 
-MediumBall = Material(mu=0.8, restitution=0.5, contact_ke=2e5, contact_kd=5e3)
+RubberBall = Material(mu=0.8, restitution=1, contact_ke=2e5, contact_kd=5e3, density=1e3)  # ~water density
+MediumBall = Material(mu=0.8, restitution=0.3, contact_ke=2e5, contact_kd=5e3)
 ClayBall = Material(mu=0.5, restitution=0.2, contact_ke=2e5, contact_kd=5e3)
 
-bouncy = Sphere(builder, radius=0.5, mass=.2, position=(-1, 5, 0), material=RubberBall)
-medium = Sphere(builder, radius=0.5, mass=.2, position=(0, 5, 0), material=MediumBall)
-dull = Sphere(builder, radius=0.5, mass=.2, position=(1, 5, 0), material=ClayBall)
-box = Box(builder, half_extends=(0.5, 0.5, 0.5), mass=2.0, position=(3, 5, 0), material=RubberBall)
+bouncy = Sphere(builder, radius=0.5, mass=.2, position=(-1, 2, 0), material=RubberBall)
+medium = Sphere(builder, radius=0.5, mass=.2, position=(0, 2, 0), material=MediumBall)
+dull = Sphere(builder, radius=0.5, mass=.2, position=(1, 2, 0), material=ClayBall)
+
+
+# Mesh Box
+rounded_cube_surface = pv.Superquadric(  
+    theta_roundness=0.3,  
+    phi_roundness=0.3,  
+)
+
+box = MeshBody(builder, body=rounded_cube_surface, quat=wp.quat_from_axis_angle(wp.vec3(1.0, 1.0, 0.0), wp.pi * 0.25), solid=True, mass=2., position=(2, 2, 0), material=MediumBall)
+
+
+# builder.particle_max_velocity = 100.0
+builder.balance_inertia = True
 
 # --- Finalize model ---
 model = builder.finalize()
+
+model.soft_contact_ke = 1e5
+
 state_0 = model.state()
 state_1 = model.state()
 control = model.control()
-solver = SolverXPBD(model, iterations=100, enable_restitution=True)
+solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=100, angular_damping=.1, enable_restitution=True)
 
-positions = []
+# --- Builder Recorder ---
+recorder = RecorderModelAndState()
 
 for frame in range(NUM_FRAMES):
     state_0.clear_forces()
 
-    wp.launch(apply_random_force_rot,
-        dim=model.body_count,
-        inputs=[state_0.body_f, 50.0, int(time.time()) + frame]
-    )
+    # wp.launch(apply_random_force,
+    #     dim=model.body_count,
+    #     inputs=[state_0.body_f, 50.0, int(time.time()) + frame]
+    # )
 
     contacts = model.collide(state_0)
     solver.step(state_0, state_1, control, contacts, DT)
     state_0, state_1 = state_1, state_0
-    pos = state_0.body_q.numpy()[:, :3]
 
-    positions.append(pos.copy())
+    recorder.record(state_0)
 
     if frame % 100 == 0:
         print(f"Frame {frame}/{NUM_FRAMES}")
 
-
-# RENDERING
-plotter = pv.Plotter(off_screen=True)
-plotter.set_background("white")
-plotter.add_axes()
-
-# Ground plane
-plane = pv.Plane(center=(0, 0, 0), direction=(0, 1, 0), i_size=25, j_size=25)
-plotter.add_mesh(plane, color="lightgray", opacity=0.8)
-
-# Plotter position
-plotter.camera_position = [
-    (20, 20, 20),
-    (0, 0, 0),
-    (0, 1, 0),
+bodies = [
+    bouncy,
+    medium,
+    dull,
+    box,
 ]
 
-mesh = [bouncy.to_pyvista(), medium.to_pyvista(), dull.to_pyvista(), box.to_pyvista()]
-color = ['red', 'black', 'green', 'blue']
-
-actors = []
-for i in range(len(mesh)):
-    actor = plotter.add_mesh(mesh[i].copy(), color=color[i], smooth_shading=True)
-    actors.append(actor)
-
-# Write Movie
-output_filename = "bounce.mp4"
-plotter.open_movie(output_filename, framerate=FPS, quality=9)
-
-for frame_idx, pos in enumerate(positions):
-    for i, actor in enumerate(actors):
-        temp_mesh = mesh[i].copy()
-        temp_mesh.translate(pos[i], inplace=True)
-
-        actor.mapper.SetInputData(temp_mesh)
-
-    plotter.write_frame()
-
-    if frame_idx % 100 == 0:
-        print(f"Rendered frame {frame_idx}/{NUM_FRAMES}")
-
-plotter.close()
-
-print("Done!")
+SceneVisualizer(recorder, bodies, FPS).render("recordings/bounce.mp4")
