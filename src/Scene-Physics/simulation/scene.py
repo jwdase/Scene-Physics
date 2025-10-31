@@ -5,8 +5,9 @@ import newton
 from newton._src.utils.recorder import RecorderModelAndState
 from newton.solvers import SolverXPBD
 
-from properties.shapes import Sphere, Box, MeshBody, SoftMesh
+from properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
 from properties.material import Material
+from utils.io import load_stimuli_start
 
 from visualization.scene import SceneVisualizer
 
@@ -20,12 +21,40 @@ NUM_FRAMES = TIME * FPS
 vec6f = wp.types.vector(length=6, dtype=float)
 builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
 
-# Material
-ClayBall = Material(mu=0.8, restitution=.01, contact_ke=2e5, contact_kd=5e3, density=1e3)
+builder.add_ground_plane()
 
-# Load the ball
-file1 = "objects/local_models/Ball_1.obj"
-box = MeshBody(builder, body=file1, quat=wp.quat_from_axis_angle(wp.vec3(1.0, 1.0, 0.0), wp.pi * 0.25), solid=True, mass=2., position=(2, 2, 0), material=ClayBall)
+# Loading data from JSON File
+simulation_specifictation = (
+    load_stimuli_start("objects/stimuli.json", "objects/local_models")
+)
+sim = next(simulation_specifictation)
+
+# Material
+Ball_material = Material(mu=0.8, restitution=.3, contact_ke=2e5, contact_kd=5e3, density=1e3)
+Floor = Material(mu=sim['rampDfriction'])
+
+# Add Ball
+ball = MeshBody(
+    builder=builder, 
+    body=sim['ball'], 
+    solid=True, 
+    scale=sim['ball_scale'] * .1,
+    position=sim['ball_postion'],
+    mass=2.0,
+    material=Ball_material,
+    quat=sim['ball_rotation']
+    )
+
+# Add Ramp
+Ramp = StableMesh(
+    builder=builder,
+    body=sim['ramp'],
+    solid=True,
+    scale=1.,
+    position=wp.vec3(0.0, 0.0, 0.0),
+    mass=0.0,
+    material=Floor,
+)
 
 # builder.particle_max_velocity = 100.0
 builder.balance_inertia = True
@@ -57,5 +86,10 @@ for frame in range(NUM_FRAMES):
         print(f"Frame {frame}/{NUM_FRAMES}")
 
 # Rendering
-bodies = [box]
-SceneVisualizer(recorder, bodies, FPS).render("recordings/import_ball.mp4")
+bodies = [ball, Ramp]
+camera = [
+    (200, 200, 200),
+    (0, 0, 0),
+    (0, 1, 0),
+]
+SceneVisualizer(recorder, bodies, FPS, camera_position=camera).render("recordings/import_ball.mp4")

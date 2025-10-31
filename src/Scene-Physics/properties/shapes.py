@@ -100,7 +100,7 @@ class Box(Body):
         
 
 class MeshBody(Body):
-    def __init__(self, builder, body, solid, **kwargs):
+    def __init__(self, builder, body, solid, scale=1.0, **kwargs):
         """
         Takes in file path to mesh and then builds/adds mesh
         object
@@ -108,11 +108,14 @@ class MeshBody(Body):
         super().__init__(builder, **kwargs)
 
         self.solid = solid
+        self.scale = scale
 
         self.pv_mesh = self.load_mesh(body)
         self.nt_mesh = self.convert_mesh()
 
         self.add_shape()
+
+        self.pv_mesh = self.pv_mesh.scale(scale)
 
     def load_mesh(self, file):
         print(type(file))
@@ -122,7 +125,6 @@ class MeshBody(Body):
             return pv.read(file)
 
     def convert_mesh(self):
-
         # Transform into object for Newton
         self.pv_mesh.compute_normals(inplace=True)
         verts = self.pv_mesh.points.astype(np.float32)
@@ -135,9 +137,16 @@ class MeshBody(Body):
             body=self.body,
             xform=wp.transform(),  # identity transform in body space
             mesh=self.nt_mesh,
-            scale=wp.vec3(.25, .25, .25),
+            scale=wp.vec3(np.ones(3) * self.scale),
             cfg=self.cfg,
         )
+
+class StableMesh(MeshBody):
+    def __init__(self, builder, **kwargs):
+        super().__init__(builder, **kwargs)
+
+    def to_pyvista(self, state):
+        return self.pv_mesh.copy()
 
 class SoftMesh:
     def __init__(self, builder, path, mass, position, material):
