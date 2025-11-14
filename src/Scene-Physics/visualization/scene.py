@@ -47,7 +47,6 @@ class SceneVisualizer:
         return [colors[i % len(colors)] for i in range(num_bodies)]
 
     def render(self, output_filename="scene_visualization.mp4"):
-
         plotter = pv.Plotter(off_screen=True)
         plotter.set_background(self.background_color)
         plotter.add_axes()

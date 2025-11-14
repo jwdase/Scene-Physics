@@ -12,8 +12,8 @@ from utils.io import load_stimuli_start
 from visualization.scene import SceneVisualizer
 
 # Simulation Constraints
-TIME = 4
-FPS = 240
+TIME = 2
+FPS = 40
 DT = 1.0 / (FPS)
 NUM_FRAMES = TIME * FPS
 
@@ -33,31 +33,40 @@ sim = next(simulation_specifictation)
 Ball_material = Material(mu=0.8, restitution=.3, contact_ke=2e5, contact_kd=5e3, density=1e3)
 Floor = Material(mu=sim['rampDfriction'])
 
+print(sim['ball_postion'])
+
 # Add Ball
-ball = MeshBody(
-    builder=builder, 
-    body=sim['ball'], 
-    solid=True, 
-    scale=sim['ball_scale'] * .1,
-    position=sim['ball_postion'],
-    mass=2.0,
-    material=Ball_material,
-    quat=sim['ball_rotation']
-    )
+# ball = MeshBody(
+#     builder=builder, 
+#     body=sim['ball'], 
+#     solid=True, 
+#     scale=sim['ball_scale'] * .01,
+#     position=sim['ball_postion'],
+#     mass=2.0,
+#     material=Ball_material,
+#     quat=sim['ball_rotation']
+#     )
+
+# Specify Rotation
+axis = wp.vec3(0.0, 1.0, 1.0)  # Z-axis  
+angle = wp.pi
+rotation = wp.quat_from_axis_angle(axis, angle)  
 
 # Add Ramp
 Ramp = StableMesh(
     builder=builder,
     body=sim['ramp'],
     solid=True,
-    scale=1.,
+    scale=.01,
     position=wp.vec3(0.0, 0.0, 0.0),
+    quat=rotation,
     mass=0.0,
     material=Floor,
 )
 
 # builder.particle_max_velocity = 100.0
 builder.balance_inertia = True
+builder.approximate_meshes(method="convex_hull")
 
 # Finalize Model
 model = builder.finalize()
@@ -74,7 +83,7 @@ recorder = RecorderModelAndState()
 
 # Simulation
 for frame in range(NUM_FRAMES):
-
+    
     state_0.clear_forces()
     contacts = model.collide(state_0)
     solver.step(state_0, state_1, control, contacts, DT)
@@ -86,10 +95,11 @@ for frame in range(NUM_FRAMES):
         print(f"Frame {frame}/{NUM_FRAMES}")
 
 # Rendering
-bodies = [ball, Ramp]
+bodies = [Ramp] #ball, 
 camera = [
-    (200, 200, 200),
-    (0, 0, 0),
+    (0, .1, -2),
+    (0, .5, 0),
     (0, 1, 0),
 ]
-SceneVisualizer(recorder, bodies, FPS, camera_position=camera).render("recordings/import_ball.mp4")
+
+SceneVisualizer(recorder, bodies, FPS, camera_position=camera).render("recordings/scene.mp4")

@@ -1,11 +1,13 @@
 import json
 import warp as wp
+import numpy as np
+
 
 def load_stimuli_start(file, folder):
     """
     Loads the stimuli data sent from becket
     """
-    with open(file, 'r') as f:
+    with open(file, "r") as f:
         data = json.load(f)
 
     # Extract trial numbers
@@ -19,38 +21,50 @@ def load_stimuli_start(file, folder):
 
     # Extract Ball and Ramp Name
     for i in range(len(trials)):
-        ball = data[trials[i]]['conditions']['ballType'].replace('b', 'B') # Remove if new config
-        ball_scale = data[trials[i]]['conditions']['ballScale']
+        ball = data[trials[i]]["conditions"]["ballType"].replace(
+            "b", "B"
+        )  # Remove if new config
+        ball_scale = data[trials[i]]["conditions"]["ballScale"]
 
-        ball_postions = data[trials[i]]['ball_positions']['1']['position']
-        ball_rotation = data[trials[i]]['ball_positions']['1']['rotation']
+        ball_postions = data[trials[i]]["ball_positions"]["1"]["position"]
+        ball_rotation = data[trials[i]]["ball_positions"]["1"]["rotation"]
 
-        ramp = data[trials[i]]['conditions']['rampType'].replace('r', 'R')[:-1]
-        rampDfriction = data[trials[i]]['conditions']['rampDFriction']
-        rampSfriction = data[trials[i]]['conditions']['rampSFriction']
+        ramp = data[trials[i]]["conditions"]["rampType"].replace("r", "R")[:-1]
+        rampDfriction = data[trials[i]]["conditions"]["rampDFriction"]
+        rampSfriction = data[trials[i]]["conditions"]["rampSFriction"]
 
-        yield({
-            'ball' : f"{folder}/{ball}.obj",
-            'ball_scale' : ball_scale,
-            'ball_postion' : convert_positions(ball_postions),
-            'ball_rotation' : convert_rotation(ball_rotation),
-            'ramp' : f"{folder}/{ramp}.obj",
-            'rampDfriction' : rampDfriction,
-            'rampSfriction' : rampSfriction,
-        })
+        yield (
+            {
+                "ball": f"{folder}/{ball}.obj",
+                "ball_scale": ball_scale,
+                "ball_postion": convert_positions(ball_postions),
+                "ball_rotation": convert_rotation(ball_rotation),
+                "ramp": f"{folder}/{ramp}.obj",
+                "rampDfriction": rampDfriction,
+                "rampSfriction": rampSfriction,
+            }
+        )
+
 
 def convert_positions(positions):
-    return wp.vec3(positions['x'], positions['y'], positions['z'])
+    vals = dict_to_array_position(positions)
+    return wp.vec3(vals[0], vals[1], vals[2])
 
 def convert_rotation(rotation):
-    return wp.quat(
-        rotation['x'],
-        rotation['y'],
-        rotation['z'],
-        rotation['w']
-    )
+    vals = dict_to_array_rotation(rotation)
+    return wp.quat(vals[0], vals[1], vals[2], vals[3])
 
-simulation_specifictation = (
-    load_stimuli_start("objects/stimuli.json", "objects/local_models")
+def dict_to_array_rotation(d):
+    return np.array([d['x'], d['y'], d['z'], d['w']])
+
+def dict_to_array_position(d):
+    """
+    Converts a dictionary to a jax.numpy array
+    NOTE: positive X axis in TDW is in the opposite direction of positive X axis in bayes3D. Therefore, we need to negate the X axis    
+    """
+    return np.array([-d['x'], d['y'], d['z']])
+
+
+simulation_specifictation = load_stimuli_start(
+    "objects/stimuli.json", "objects/local_models"
 )
-sim_1 = next(simulation_specifictation)

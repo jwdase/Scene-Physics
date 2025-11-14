@@ -6,7 +6,6 @@ import pyvista as pv
 import numpy as np
 from scipy.spatial.transform import Rotation  
 
-
 from properties.material import Material
 
 class Body:
@@ -31,18 +30,17 @@ class Body:
         self.body = self.builder.add_body(
             xform=wp.transform(self.position, self.quat),
             mass=self.mass
-        )        
+        )    
 
     def to_pyvista(self, state):  
-        # Extract full transform (position + rotation)  
-        transform = state['body_q'].numpy()[self.shape_start_index]  
+        # Extract full transform (position + rotation)
+        transform = state['body_q'].numpy()[self.shape_start_index]
         
         mesh = self.pv_mesh.copy() 
 
         position = transform[0:3]  # [x, y, z]  
         quat_xyzw = transform[3:7]  # [qx, qy, qz, qw] 
 
-        
         # Switch systems
         rotation = Rotation.from_quat(quat_xyzw)  
         rotation_matrix = rotation.as_matrix()   
@@ -50,8 +48,10 @@ class Body:
         # Apply Transformation
         transform_matrix = np.eye(4)  
         transform_matrix[:3, :3] = rotation_matrix  
-        transform_matrix[:3, 3] = position           
-        
+        transform_matrix[:3, 3] = position
+
+        assert np.all(np.isfinite(transform_matrix)), "Transform matrix contains non-finite values!"
+
         # Apply rotation first (around origin)  
         mesh.transform(transform_matrix, inplace=True)  
         
@@ -144,9 +144,11 @@ class MeshBody(Body):
 class StableMesh(MeshBody):
     def __init__(self, builder, **kwargs):
         super().__init__(builder, **kwargs)
+        self.rotation = rotation = Rotation.from_quat(self.quat)
 
     def to_pyvista(self, state):
-        return self.pv_mesh.copy()
+        mesh = self.pv_mesh.copy()
+        return mesh.rotate(self.rotation, inplace=False)
 
 class SoftMesh:
     def __init__(self, builder, path, mass, position, material):
