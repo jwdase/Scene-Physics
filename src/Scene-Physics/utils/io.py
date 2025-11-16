@@ -62,6 +62,7 @@ def dict_to_array_position(d):
     Converts a dictionary to a jax.numpy array
     NOTE: positive X axis in TDW is in the opposite direction of positive X axis in bayes3D. Therefore, we need to negate the X axis    
     """
+    
     return np.array([-d['x'], d['y'], d['z']])
 
 

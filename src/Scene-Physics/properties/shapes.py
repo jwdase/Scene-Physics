@@ -100,12 +100,16 @@ class Box(Body):
         
 
 class MeshBody(Body):
-    def __init__(self, builder, body, solid, scale=1.0, **kwargs):
+    def __init__(self, builder, body, solid, scale=1.0, stable=False, **kwargs):
         """
         Takes in file path to mesh and then builds/adds mesh
         object
         """
         super().__init__(builder, **kwargs)
+
+        print(self.cfg.density)
+
+        self.data_test(stable)
 
         self.solid = solid
         self.scale = scale
@@ -116,6 +120,11 @@ class MeshBody(Body):
         self.add_shape()
 
         self.pv_mesh = self.pv_mesh.scale(scale)
+
+    def data_test(self, stable):
+        if stable:
+            assert self.cfg.density == 0.0 
+
 
     def load_mesh(self, file):
         print(type(file))
@@ -143,12 +152,14 @@ class MeshBody(Body):
 
 class StableMesh(MeshBody):
     def __init__(self, builder, **kwargs):
+        kwargs['mass'] = 0.0
+        kwargs['stable'] = True
         super().__init__(builder, **kwargs)
-        self.rotation = rotation = Rotation.from_quat(self.quat)
+        self.rotation = Rotation.from_quat(self.quat)
 
-    def to_pyvista(self, state):
-        mesh = self.pv_mesh.copy()
-        return mesh.rotate(self.rotation, inplace=False)
+    # def to_pyvista(self, state):
+    #     mesh = self.pv_mesh.copy()
+    #     return mesh.rotate(self.rotation, inplace=False)
 
 class SoftMesh:
     def __init__(self, builder, path, mass, position, material):

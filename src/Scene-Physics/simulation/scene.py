@@ -21,6 +21,7 @@ NUM_FRAMES = TIME * FPS
 vec6f = wp.types.vector(length=6, dtype=float)
 builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
 
+# Add Plane
 builder.add_ground_plane()
 
 # Loading data from JSON File
@@ -31,37 +32,31 @@ sim = next(simulation_specifictation)
 
 # Material
 Ball_material = Material(mu=0.8, restitution=.3, contact_ke=2e5, contact_kd=5e3, density=1e3)
+Ramp_material = Material(density=0.0)
 Floor = Material(mu=sim['rampDfriction'])
 
-print(sim['ball_postion'])
-
 # Add Ball
-# ball = MeshBody(
-#     builder=builder, 
-#     body=sim['ball'], 
-#     solid=True, 
-#     scale=sim['ball_scale'] * .01,
-#     position=sim['ball_postion'],
-#     mass=2.0,
-#     material=Ball_material,
-#     quat=sim['ball_rotation']
-#     )
-
-# Specify Rotation
-axis = wp.vec3(0.0, 1.0, 1.0)  # Z-axis  
-angle = wp.pi
-rotation = wp.quat_from_axis_angle(axis, angle)  
+ball = MeshBody(
+    builder=builder, 
+    body=sim['ball'], 
+    solid=True, 
+    scale=sim['ball_scale'] * .01,
+    position=sim['ball_postion'] + wp.vec3(0, -.5, 0),
+    mass=2.0,
+    material=Ball_material,
+    quat=sim['ball_rotation']
+    )
 
 # Add Ramp
 Ramp = StableMesh(
     builder=builder,
-    body=sim['ramp'],
+    body='objects/ramp_modified_3.obj',
     solid=True,
-    scale=.01,
-    position=wp.vec3(0.0, 0.0, 0.0),
-    quat=rotation,
+    scale=1.0,
+    position=wp.vec3(0.0, 1.00, 0.0),
+    # quat=rotation,
     mass=0.0,
-    material=Floor,
+    material=Ramp_material,
 )
 
 # builder.particle_max_velocity = 100.0
@@ -76,14 +71,13 @@ model.soft_contact_ke = 1e5
 state_0 = model.state()
 state_1 = model.state()
 control = model.control()
-solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=100, angular_damping=.1, enable_restitution=True)
+solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=100, angular_damping=.1, enable_restitution=False)
 
 # Recorder
 recorder = RecorderModelAndState()
 
 # Simulation
 for frame in range(NUM_FRAMES):
-    
     state_0.clear_forces()
     contacts = model.collide(state_0)
     solver.step(state_0, state_1, control, contacts, DT)
@@ -95,10 +89,10 @@ for frame in range(NUM_FRAMES):
         print(f"Frame {frame}/{NUM_FRAMES}")
 
 # Rendering
-bodies = [Ramp] #ball, 
+bodies = [Ramp, ball]
 camera = [
-    (0, .1, -2),
-    (0, .5, 0),
+    (0, .5, 3),
+    (0, 1, 0),
     (0, 1, 0),
 ]
 

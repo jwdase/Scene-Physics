@@ -30,7 +30,7 @@ class SceneVisualizer:
         num_bodies = len(self.bodies)
 
         colors = [
-            "red",
+            # "red",
             "green",
             "blue",
             "white",
