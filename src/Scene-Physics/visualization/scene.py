@@ -2,7 +2,7 @@ import copy
 import time
 
 import pyvista as pv
-
+import numpy as np
 
 class SceneVisualizer:
     def __init__(
@@ -84,3 +84,32 @@ class SceneVisualizer:
         plotter.close()
 
         print(f"Visualization saved to {output_filename}")
+
+    def gen_depth(self):
+        """
+        Generates depth so we can compare similarity
+        """
+
+        # Setup screen
+        plotter = pv.Plotter(off_screen=True)
+        plotter.camera_position = self.camera_position
+
+        # We want to check stability against the final state
+        final_state = self.recorder.history[-1]
+
+        # Add all the bodies
+        for i, body in enumerate(self.bodies):
+            plotter.add_mesh(
+                body.to_pyvista(final_state).copy(),
+                color=self.color[i],
+                smooth_shading=True,
+            )
+        
+        # Create projection
+        plotter.screenshot('file.png')
+
+        return np.array(plotter.get_image_depth())
+        
+
+        
+

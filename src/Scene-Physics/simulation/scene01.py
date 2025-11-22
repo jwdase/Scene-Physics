@@ -30,7 +30,7 @@ Ramp_material = Material(density=0.0)
 
 paths = [f'objects/scene01/{val}' for val in ['BOWL.obj', 'COFFEE.obj', 'TABLE.obj']]
 
-# Add Ball
+# Add Object 1
 obj1 = MeshBody(
     builder=builder, 
     body=paths[0], 
@@ -41,6 +41,7 @@ obj1 = MeshBody(
     material=Ramp_material,
     )
 
+# Add Object 2
 obj2 = MeshBody(
     builder=builder, 
     body=paths[1], 
@@ -51,6 +52,7 @@ obj2 = MeshBody(
     material=Ramp_material,
     )
 
+# Add Object 3
 obj3 = MeshBody(
     builder=builder, 
     body=paths[2], 
@@ -93,9 +95,16 @@ for frame in range(NUM_FRAMES):
 # Rendering
 bodies = [obj1, obj2, obj3]
 camera = [
-    (0, .5, 3),
+    (0, 1, 3),
     (0, 1, 0),
     (0, 1, 0),
 ]
 
-SceneVisualizer(recorder, bodies, FPS, camera_position=camera).render("recordings/initial_still.mp4")
+# Create the visualizer
+visualizer = SceneVisualizer(recorder, bodies, FPS, camera_position=camera)
+
+# Render visualization
+visualizer.render("recordings/initial_still.mp4")
+
+# Create projection
+image = visualizer.gen_depth()
