@@ -107,4 +107,4 @@ visualizer = SceneVisualizer(recorder, bodies, FPS, camera_position=camera)
 visualizer.render("recordings/initial_still.mp4")
 
 # Create projection
-image = visualizer.gen_depth()
+depths = visualizer.gen_depth()
