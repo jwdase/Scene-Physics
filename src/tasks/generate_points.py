@@ -1,5 +1,5 @@
 import sys
-sys.path.append("/orcd/home/002/jwdase/project/Scene-Physics/b3d/src")
+sys.path.append("/orcd/home/002/jacktuck/Scene-Physics/b3d/src")
 
 import pyvista as pv
 import numpy as np
@@ -88,7 +88,7 @@ def plot_point_maps(point_cloud, location):
     pts = np.array(point_cloud).reshape(-1, 3)
     pts[:,2] = -pts[:,2]
     pc = pv.PolyData(pts)
-
+    pc.save("point_cloud.ply")
     pc.plot(
         point_size=5,
         style="points",
@@ -100,23 +100,40 @@ plot_point_maps(point_cloud, "cloud1.png")
 
 # Remove all nan
 point_cloud = np.array(point_cloud)
-point_cloud[np.isnan(point_cloud)] = 100
+point_cloud[np.isnan(point_cloud)] = 10000
 point_cloud = jnp.array(point_cloud)
 
 # ---------------------------------------------
-# Compute per-pixel likelihoods
+# Test similarity scores with noise
 # ---------------------------------------------
-image_likelihoods = threedp3_likelihood_per_pixel_old(
-    observed_xyz=point_cloud,
-    rendered_xyz=point_cloud,
-    variance=0.001,
-    outlier_prob=0.001,
-    outlier_volume=1.0,
-    filter_size=3,
-)
+noise_levels = [0.0, 0.001, 0.01, 0.05, 0.1]
 
-likelihood = image_likelihoods["pix_score"]
+print("Testing similarity scores with white noise:")
+print("-" * 70)
 
-clean = np.array([arr[~np.isnan(arr)] for arr in likelihood])
+scores = []
+for noise_std in noise_levels:
+    # Add white noise to point cloud
+    noise = np.random.normal(0, noise_std, point_cloud.shape)
+    noisy_point_cloud = point_cloud + noise
+    
+    # Compute per-pixel likelihoods
+    image_likelihoods = threedp3_likelihood_per_pixel_old(
+        observed_xyz=noisy_point_cloud,
+        rendered_xyz=point_cloud,
+        variance=0.001,
+        outlier_prob=0.001,
+        outlier_volume=1.0,
+        filter_size=3,
+    )
+    
+    likelihood = image_likelihoods["pix_score"]
+    clean = np.array([arr[~np.isnan(arr)] for arr in likelihood])
+    score = clean.sum()
+    scores.append(score)
 
-print("Likelihood score:", clean.sum())
+baseline_score = scores[0]
+
+for noise_std, score in zip(noise_levels, scores):
+    pct_change = ((score - baseline_score) / abs(baseline_score)) * 100
+    print(f"Noise std={noise_std:6.3f} -> Score: {score:12.2f} | Change: {pct_change:+6.2f}%")
