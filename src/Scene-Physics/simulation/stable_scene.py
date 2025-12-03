@@ -1,3 +1,7 @@
+# Add the correc paths for me
+from utils.io import setup_path
+setup_path('jonathan')
+
 import pyvista as pv
 import warp as wp
 import newton

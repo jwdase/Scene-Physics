@@ -3,6 +3,7 @@ import time
 
 import pyvista as pv
 import numpy as np
+import jax.numpy as jnp
 
 class SceneVisualizer:
     def __init__(
@@ -20,6 +21,8 @@ class SceneVisualizer:
                 (0, 1, 0),
             ]
         )
+
+        self.point_cloud_camera = [(1, 1.5, 3), (0, 1, 0), (0, 1, 0)]
 
         self.background_color = background_color
 
@@ -92,7 +95,7 @@ class SceneVisualizer:
 
         # Setup screen
         plotter = pv.Plotter(off_screen=True)
-        plotter.camera_position = self.camera_position
+        plotter.camera_position = self.point_cloud_camera
         plane = pv.Plane(center=(0, 0, 0), direction=(0, 1, 0), i_size=25, j_size=25)
 
         # We want to check stability against the final state
@@ -109,16 +112,16 @@ class SceneVisualizer:
         # Create projection
         plotter.screenshot('file.png')
 
-        return np.array(plotter.get_image_depth()), self.gen_camera()
+        return plotter.get_image_depth(), self.gen_camera()
     
-    def get_camera_intrinsics(self):
+    def gen_camera(self):
         """
         returns camera intrinsics (call it once)
         """
 
         # Generates plotter 
         plotter = pv.Plotter(off_screen=True)
-        plotter.camera_position = self.camera_position
+        plotter.camera_position = self.point_cloud_camera
 
         # Get Camere properties
         camera = plotter.camera
@@ -127,18 +130,16 @@ class SceneVisualizer:
 
         # Get field of view in degrees
         fov_degrees = camera.view_angle
-        fov_radians = np.radians(fov_degrees)
+        fov_rad = np.radians(fov_degrees)
 
-        # Compute fx
-        fy = height / (2 * np.tan(fov_radians / 2))
-        aspect_ratio = width / height
-        fx = fy * aspect_ratio
+        # Standard pinhole intrinsics
+        fy = height / (2 * np.tan(fov_rad / 2))
+        fx = fy * (width / height)
 
         cx = width / 2
         cy = height / 2
 
-
-        intrinsics = {
+        return {
             'height' : height,
             'width' : width,
             'fx' : fx,
@@ -149,6 +150,38 @@ class SceneVisualizer:
             'far' : far
         }
 
+    def point_cloud(self, intrinsic_func, unprojected_depth_func, clip=True):
+        """
+        takes in a class that calculates camera intrinsics
+        passed into depth function that yields a point cloud
+        """
 
+        # Get depth
+        depth, camera_data = self.gen_3dPoint()
 
-        
+        # Bayes3D intrinsic function
+        intrinsic = intrinsic_func(
+            height=camera_data["height"],
+            width=camera_data["width"],
+            fx=camera_data["fx"],
+            fy=camera_data["fy"],
+            cx=camera_data["cx"],
+            cy=camera_data["cy"],
+            near=camera_data["near"],
+            far=camera_data["far"],
+        )
+
+        # Flip depth from input
+        depth = np.array(depth, dtype=np.float32)
+        zlinear = depth 
+        point_cloud = unprojected_depth_func(zlinear, intrinsic)
+
+        # Turn into np array
+        point_cloud = np.array(point_cloud)
+
+        # Remove all values too large
+        if clip is True:
+            point_cloud[np.isnan(point_cloud)] = 1000
+            point_cloud = jnp.array(point_cloud)
+
+        return point_cloud

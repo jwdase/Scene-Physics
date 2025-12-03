@@ -1,3 +1,7 @@
+# Add the correc paths for me
+from utils.io import setup_path
+setup_path('jonathan')
+
 import pyvista as pv
 import warp as wp
 import newton
@@ -12,7 +16,7 @@ from utils.io import load_stimuli_start
 from visualization.scene import SceneVisualizer
 
 # Simulation Constraints
-TIME = 2
+TIME = 3
 FPS = 40
 DT = 1.0 / (FPS)
 NUM_FRAMES = TIME * FPS

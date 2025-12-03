@@ -25,7 +25,6 @@ plotter.add_mesh(pv.Sphere(center=(0, 1, 0)))
 plotter.screenshot("photo.png")
 zval = plotter.get_image_depth()
 
-
 # ---------------------------------------------
 # Compute intrinsics from an existing plotter
 # ---------------------------------------------
@@ -100,7 +99,7 @@ plot_point_maps(point_cloud, "cloud1.png")
 
 # Remove all nan
 point_cloud = np.array(point_cloud)
-point_cloud[np.isnan(point_cloud)] = 10000
+point_cloud[np.isnan(point_cloud)] = 1_000
 point_cloud = jnp.array(point_cloud)
 
 # ---------------------------------------------
