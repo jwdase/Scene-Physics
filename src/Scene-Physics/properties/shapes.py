@@ -30,11 +30,25 @@ class Body:
         self.body = self.builder.add_body(
             xform=wp.transform(self.position, self.quat),
             mass=self.mass
-        )    
+        )
 
-    def to_pyvista(self, state):  
+    def to_pyvista_png(self):
+        """ Used for extracting start position"""
+        transform = np.array(self.builder.body_q)[self.shape_start_index]
+
+        return self.pyvista_body(transform)
+
+
+    def to_pyvista(self, state):
+        """ Class used for animating position of objects through simulation"""
+
         # Extract full transform (position + rotation)
         transform = state['body_q'].numpy()[self.shape_start_index]
+
+        return self.pyvista_body(transform)
+
+    def pyvista_body(self, transform):
+        """ Used to generate the shape """
         
         mesh = self.pv_mesh.copy() 
 

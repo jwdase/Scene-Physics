@@ -29,6 +29,27 @@ class Visualizer:
 
         self.color = self.gen_colors()
 
+    def gen_colors(self):
+        num_bodies = len(self.bodies)
+
+        colors = [
+            # "red",
+            "green",
+            "blue",
+            "white",
+            "black",
+            "yellow",
+            "cyan",
+            "magenta",
+            "lightblue",
+            "darkblue",
+            "brown",
+            "beige",
+        ]
+
+        return [colors[i % len(colors)] for i in range(num_bodies)]
+
+
     def gen_camera(self):
         """
         returns camera intrinsics (call it once)
@@ -107,6 +128,16 @@ class Visualizer:
 
         return point_cloud
 
+    def gen_png(self, name):
+        plotter = self.fill_scene()
+        plotter.screenshot(name)
+
+    def gen_3dPoint(self):
+        plotter = self.fill_scene()
+        plotter.show()
+
+        return plotter.get_image_depth()
+
 
 class VideoVisualizer(Visualizer):
     def __init__(
@@ -116,26 +147,6 @@ class VideoVisualizer(Visualizer):
 
         self.recorder = recorder
         self.FPS = FPS
-
-    def gen_colors(self):
-        num_bodies = len(self.bodies)
-
-        colors = [
-            # "red",
-            "green",
-            "blue",
-            "white",
-            "black",
-            "yellow",
-            "cyan",
-            "magenta",
-            "lightblue",
-            "darkblue",
-            "brown",
-            "beige",
-        ]
-
-        return [colors[i % len(colors)] for i in range(num_bodies)]
 
     def render(self, output_filename="scene_visualization.mp4"):
         plotter = pv.Plotter(off_screen=True)
@@ -176,10 +187,8 @@ class VideoVisualizer(Visualizer):
 
         print(f"Visualization saved to {output_filename}")
 
-    def gen_3dPoint(self):
-        """
-        Generates depth so we can compare similarity
-        """
+    def fill_scene(self):
+        """Places the objects in the scene"""
         # Setup screen
         plotter = pv.Plotter(off_screen=True)
         plotter.camera_position = self.point_cloud_camera
@@ -195,11 +204,35 @@ class VideoVisualizer(Visualizer):
                 color=self.color[i],
                 smooth_shading=True,
             )
-        
-        # Create projection
-        plotter.screenshot('file.png')
 
-        return plotter.get_image_depth()
+        return plotter
+
 
 class PyVistaVisuailzer(Visualizer):
-    
+    """Class for getting png and comparisons - no simulation"""
+    def __init__(self, bodies, camera_position, background_color='white'):
+        super().__init__(bodies, camera_position, background_color)
+
+    def fill_scene(self):
+        """Places the objects in the scene"""
+
+        # Setup plotter
+        plotter = pv.Plotter(off_screen=True)
+        plotter.set_background(self.background_color)
+        plotter.add_axes()
+
+        # Ground plane
+        plane = pv.Plane(center=(0, 0, 0), direction=(0, 1, 0), i_size=25, j_size=25)
+        plotter.add_mesh(plane, color="lightgray", opacity=0.8)
+
+        # Plotter position
+        plotter.camera_position = self.camera_position
+
+        for i, body in enumerate(self.bodies):
+            plotter.add_mesh(
+                body.to_pyvista_png(),
+                color=self.color[i],
+                smooth_shading=True
+            )
+
+        return plotter
