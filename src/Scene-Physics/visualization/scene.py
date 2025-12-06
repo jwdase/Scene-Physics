@@ -5,11 +5,14 @@ import pyvista as pv
 import numpy as np
 import jax.numpy as jnp
 
-class SceneVisualizer:
-    def __init__(
-        self, recorder, bodies, FPS, camera_position=None, background_color="white"
-    ):
-        self.recorder = recorder
+class Visualizer:
+    """
+    General class for visualizing our inputs
+    """
+    def __init__(self, bodies, camera_position, background_color='white'):
+        self.camera_intrinsics = None
+        self.point_cloud_camera = [(1, 1.5, 3), (0, 1, 0), (0, 1, 0)]
+
         self.bodies = bodies
 
         self.camera_position = (
@@ -22,11 +25,96 @@ class SceneVisualizer:
             ]
         )
 
-        self.point_cloud_camera = [(1, 1.5, 3), (0, 1, 0), (0, 1, 0)]
-
         self.background_color = background_color
 
         self.color = self.gen_colors()
+
+    def gen_camera(self):
+        """
+        returns camera intrinsics (call it once)
+        """
+
+        # Generates plotter 
+        plotter = pv.Plotter(off_screen=True)
+        plotter.camera_position = self.point_cloud_camera
+
+        # Get Camere properties
+        camera = plotter.camera
+        near, far = camera.clipping_range
+        width, height = plotter.render_window.GetSize()
+
+        # Get field of view in degrees
+        fov_degrees = camera.view_angle
+        fov_rad = np.radians(fov_degrees)
+
+        # Standard pinhole intrinsics
+        fy = height / (2 * np.tan(fov_rad / 2))
+        fx = fy * (width / height)
+
+        cx = width / 2
+        cy = height / 2
+
+        return {
+            'height' : height,
+            'width' : width,
+            'fx' : fx,
+            'fy' : fy,
+            'cx' : cx,
+            'cy' : cy,
+            'near' : near,
+            'far' : far
+        }
+
+    def set_intrinsics(self, intrinsic_func):
+        """ Set Camera Intrinsics Once"""
+        camera_data = self.gen_camera()
+
+        # Create camera_intrinsics data once
+        self.camera_intrinsics = intrinsic_func(
+            height=camera_data["height"],
+            width=camera_data["width"],
+            fx=camera_data["fx"],
+            fy=camera_data["fy"],
+            cx=camera_data["cx"],
+            cy=camera_data["cy"],
+            near=camera_data["near"],
+            far=camera_data["far"],
+        )
+
+    def point_cloud(self, unprojected_depth_func, clip=True):
+        """
+        takes in a class that calculates camera intrinsics
+        passed into depth function that yields a point cloud
+        """
+
+        # Ensures we have the camera intrinsics function
+        assert self.camera_intrinsics is not None, "Camera Intrinsics cannot be None - set it first"
+        
+        # Get the depth
+        depth = self.gen_3dPoint()
+
+        # Flip depth from input
+        zlinear = np.array(depth, dtype=np.float32)
+        point_cloud = unprojected_depth_func(zlinear, self.camera_intrinsics)
+
+        # Turn into np array
+        point_cloud = np.array(point_cloud)
+
+        # Remove all values too large
+        if clip is True:
+            point_cloud[np.isnan(point_cloud)] = 1000
+            point_cloud = jnp.array(point_cloud)
+
+        return point_cloud
+
+
+class VideoVisualizer(Visualizer):
+    def __init__(
+        self, recorder, bodies, FPS, camera_position=None, background_color="white"
+    ):
+        super().__init__(bodies, camera_position, background_color)
+
+        self.recorder = recorder
         self.FPS = FPS
 
     def gen_colors(self):
@@ -92,7 +180,6 @@ class SceneVisualizer:
         """
         Generates depth so we can compare similarity
         """
-
         # Setup screen
         plotter = pv.Plotter(off_screen=True)
         plotter.camera_position = self.point_cloud_camera
@@ -112,76 +199,7 @@ class SceneVisualizer:
         # Create projection
         plotter.screenshot('file.png')
 
-        return plotter.get_image_depth(), self.gen_camera()
+        return plotter.get_image_depth()
+
+class PyVistaVisuailzer(Visualizer):
     
-    def gen_camera(self):
-        """
-        returns camera intrinsics (call it once)
-        """
-
-        # Generates plotter 
-        plotter = pv.Plotter(off_screen=True)
-        plotter.camera_position = self.point_cloud_camera
-
-        # Get Camere properties
-        camera = plotter.camera
-        near, far = camera.clipping_range
-        width, height = plotter.render_window.GetSize()
-
-        # Get field of view in degrees
-        fov_degrees = camera.view_angle
-        fov_rad = np.radians(fov_degrees)
-
-        # Standard pinhole intrinsics
-        fy = height / (2 * np.tan(fov_rad / 2))
-        fx = fy * (width / height)
-
-        cx = width / 2
-        cy = height / 2
-
-        return {
-            'height' : height,
-            'width' : width,
-            'fx' : fx,
-            'fy' : fy,
-            'cx' : cx,
-            'cy' : cy,
-            'near' : near,
-            'far' : far
-        }
-
-    def point_cloud(self, intrinsic_func, unprojected_depth_func, clip=True):
-        """
-        takes in a class that calculates camera intrinsics
-        passed into depth function that yields a point cloud
-        """
-
-        # Get depth
-        depth, camera_data = self.gen_3dPoint()
-
-        # Bayes3D intrinsic function
-        intrinsic = intrinsic_func(
-            height=camera_data["height"],
-            width=camera_data["width"],
-            fx=camera_data["fx"],
-            fy=camera_data["fy"],
-            cx=camera_data["cx"],
-            cy=camera_data["cy"],
-            near=camera_data["near"],
-            far=camera_data["far"],
-        )
-
-        # Flip depth from input
-        depth = np.array(depth, dtype=np.float32)
-        zlinear = depth 
-        point_cloud = unprojected_depth_func(zlinear, intrinsic)
-
-        # Turn into np array
-        point_cloud = np.array(point_cloud)
-
-        # Remove all values too large
-        if clip is True:
-            point_cloud[np.isnan(point_cloud)] = 1000
-            point_cloud = jnp.array(point_cloud)
-
-        return point_cloud

@@ -26,7 +26,7 @@ import b3d
 # Files
 from properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
 from properties.material import Material
-from visualization.scene import SceneVisualizer
+from visualization.scene import VideoVisualizer
 from utils.io import plot_point_maps
 
 # Simple Constraints
@@ -109,14 +109,17 @@ camera = [
 ]
 
 # Create the visualizer
-visualizer = SceneVisualizer(recorder, bodies, FPS, camera_position=camera)
+visualizer = VideoVisualizer(recorder, bodies, FPS, camera_position=camera)
 
 # Render visualization
 visualizer.render("recordings/initial_still.mp4")
 
-# # Create projection
-point_cloud = visualizer.point_cloud(Intrinsics, unproject_depth)
-point_cloud2 = visualizer.point_cloud(Intrinsics, unproject_depth, clip=False)
+# Set intrinsics
+visualizer.set_intrinsics(Intrinsics)
+
+# Create projection
+point_cloud = visualizer.point_cloud(unproject_depth)
+point_cloud2 = visualizer.point_cloud(unproject_depth, clip=False)
 
 
 noise = np.random.normal(0, .005, point_cloud.shape)

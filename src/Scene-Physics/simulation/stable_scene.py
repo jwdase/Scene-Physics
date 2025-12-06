@@ -13,7 +13,7 @@ from properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
 from properties.material import Material
 from utils.io import load_stimuli_start
 
-from visualization.scene import SceneVisualizer
+from visualization.scene import VideoVisualizer
 
 # ============================================================
 # SIMULATION PARAMETERS - ADJUST THESE AS NEEDED
@@ -198,7 +198,7 @@ camera = [
 
 # Create visualizer
 print(f"\nRendering video to: {OUTPUT_VIDEO}")
-visualizer = SceneVisualizer(recorder, bodies, FPS, camera_position=camera)
+visualizer = VideoVisualizer(recorder, bodies, FPS, camera_position=camera)
 
 # Render visualization
 visualizer.render(OUTPUT_VIDEO)

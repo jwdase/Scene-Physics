@@ -13,7 +13,7 @@ from properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
 from properties.material import Material
 from utils.io import load_stimuli_start
 
-from visualization.scene import SceneVisualizer
+from visualization.scene import VideoVisualizer
 
 # Simulation Constraints
 TIME = 3
@@ -105,10 +105,7 @@ camera = [
 ]
 
 # Create the visualizer
-visualizer = SceneVisualizer(recorder, bodies, FPS, camera_position=camera)
+visualizer = VideoVisualizer(recorder, bodies, FPS, camera_position=camera)
 
 # Render visualization
 visualizer.render("recordings/initial_still.mp4")
-
-# Create projection
-depths = visualizer.gen_depth()

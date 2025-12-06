@@ -57,6 +57,20 @@ class Body:
         
         return mesh
 
+    def update_position(self, x, z, quat=None):
+        """
+        Update position of mesh to in space
+        """
+
+        # Get rotation 
+        new_quat = quat if quat is not None else wp.quat_identity()
+        new_pos = wp.vec3(float(x), 0., float(y))
+
+        # Update position
+        self.builder.shape_transform[self.shape_start_index] = (
+            wp.transform(new_pos, new_quat)
+        )
+
     def translate(self, positions):
         pass
 
@@ -77,7 +91,6 @@ class Sphere(Body):
         self.builder.add_shape_sphere(
             body=self.body, radius=self.radius, cfg=self.cfg,
         )
-
 
 class Box(Body):
     def __init__(self, builder, half_extends, **kwargs):
@@ -107,8 +120,6 @@ class MeshBody(Body):
         """
         super().__init__(builder, **kwargs)
 
-        print(self.cfg.density)
-
         self.data_test(stable)
 
         self.solid = solid
@@ -127,7 +138,6 @@ class MeshBody(Body):
 
 
     def load_mesh(self, file):
-        print(type(file))
         if isinstance(file, pv.core.pointset.PolyData):
             return file
         else:

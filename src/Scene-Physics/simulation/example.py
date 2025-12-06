@@ -13,7 +13,7 @@ from properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
 from properties.material import Material
 from utils.io import load_stimuli_start
 
-from visualization.scene import SceneVisualizer
+from visualization.scene import VideoVisualizer
 
 # Simulation Constraints
 TIME = 2
@@ -100,4 +100,4 @@ camera = [
     (0, 1, 0),
 ]
 
-SceneVisualizer(recorder, bodies, FPS, camera_position=camera).render("recordings/scene.mp4")
+VideoVisualizer(recorder, bodies, FPS, camera_position=camera).render("recordings/scene.mp4")
