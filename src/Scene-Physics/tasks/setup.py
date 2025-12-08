@@ -123,14 +123,25 @@ class Likelihood:
 
 likelihood_func = Likelihood(point_cloud)
 
+def update_position_concrete(x, z):  
+    # This function runs outside JAX tracing and can use .item()  
+    x_val = float(jnp.asarray(x).item())  
+    z_val = float(jnp.asarray(z).item())  
+    # Your original B3D code here  
+    return result
+
 @gen
 def model(x):
     # Sample latent variables
     x = uniform(-3., 3.) @ 'x'
     z = uniform(-3., 3.) @ 'z'
 
+    # Convert into floats
+    x_input = x.astype(jnp.float32)
+    z_input = z.astype(jnp.float32)
+
     # Update object position, and new point cloud
-    rectangle.update_position(x, z)
+    rectangle.update_position(x_input, z_input)
     point_cloud = visualizer.point_cloud(unproject_depth)
 
     # Calc Likelihood of Placement

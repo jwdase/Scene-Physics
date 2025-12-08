@@ -10,7 +10,7 @@ import jax.numpy as jnp
 from properties.material import Material
 
 class Body:
-    def __init__(self, builder, position, mass, material=None, quat=None):
+    def __init__(self, builder, position, mass, material=None, quat=None, name=None):
         self.builder = builder
 
         # Location / Mass
@@ -33,8 +33,11 @@ class Body:
             mass=self.mass
         )
 
+        self.name = name
+
     def to_pyvista_png(self):
         """ Used for extracting start position"""
+
         transform = np.array(self.builder.body_q)[self.shape_start_index]
 
         return self.pyvista_body(transform)
@@ -76,31 +79,29 @@ class Body:
         """
         Update position of mesh to in space
         """
-        try:
-            x_val = float(jnp.asarray(x).item())
-            z_val = float(jnp.asarray(z).item())
-        except:
-            x_val = float(x)
-            z_val = float(z)
 
         # Ensures correctly converted to float
-        assert isinstance(x_val, float) and isinstance(z_val, float), "x and z must be floats"
+        assert isinstance(x, float) and isinstance(z, float), "x and z must be floats"
 
         # Get rotation 
         new_quat = quat if quat is not None else wp.quat_identity()
+        new_pos = wp.vec3(x, 0., z)
 
-        new_pos = wp.vec3(x_val, 0., z_val)
+        # New transformation
+        new_transform = wp.transform(new_pos, new_quat)
 
-        # Update position
-        self.builder.shape_transform[self.shape_start_index] = (
-            wp.transform(new_pos, new_quat)
-        )
+        # Update shape transform (shape to body frame)  
+        self.builder.shape_transform[self.shape_start_index] = new_transform 
+        self.builder.body_q[self.shape_start_index] = new_transform
 
     def translate(self, positions):
         pass
 
     def add_shape(self):
         raise NotImplementedError
+
+    def __str__(self):
+        return self.name
 
 class Sphere(Body):
     def __init__(self, builder, radius, **kwargs):
