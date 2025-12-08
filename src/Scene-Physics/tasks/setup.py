@@ -7,6 +7,7 @@ import pyvista
 import warp as wp
 import numpy as np
 import jax.numpy as jnp
+import jax
 import matplotlib.pyplot as plt
 
 # GenJax
@@ -118,7 +119,7 @@ class Likelihood:
         )
 
         # [TODO] DOUBLE CHECK IF CORRECT
-        return (self.get_likelihood(score)) / self.control
+        return (self.get_likelihood(new_score)) / self.control
 
 likelihood_func = Likelihood(point_cloud)
 
@@ -140,9 +141,6 @@ def model(x):
 
     return result
 
-# Unsure what to set this to
-obs_physics = C["ll_score"].set(0.0)
-
 @gen
 def prop_physics(tr, *_):
     # Get current sampled values from the previous trace
@@ -155,3 +153,75 @@ def prop_physics(tr, *_):
     z = normal(orig_z, 0.1) @ "z"
     
     return x, z
+
+
+def metropolis_hastings_move(mh_args, key):
+    """ Proposes a Metropolis Hastings Move """
+
+    # Upack input values
+    trace, model, proposal, proposal_args, observations = mh_args
+    model_args = trace.get_args()
+
+    # For compute, do not differentiable
+    argdiffs = Diff.no_change(model_args)
+    proposal_args_forward = (trace, *proposal_args)
+
+    # Propose choice in forward direction
+    key, subkey = jax.random.split(key)
+    fwd_choices, fwd_weight, _ = proposal.propose(key, proposal_args_forward)
+
+    # Need update model to new trace
+    new_trace, weight, _, discard = model.update(subkey, trace, fwd_choices, argdiffs)
+
+    # Need to calculate acceptability in update
+    proposal_args_backward = (new_trace, *proposal_args)
+    bwd_weight, _ = proposal.assess(discard, proposal_args_backward)
+
+    alpha = weight - fwd_weight + bwd_weight
+    key, subkey = jax.random.split(key)
+
+    # Draw a unifrom random number, if less than alpha accepted, if not rejects
+    ret_fun = jax.lax.cond(
+        jnp.log(jax.random.uniform(subkey)) < alpha, lambda: new_trace, lambda: trace
+    )
+    return (ret_fun, model, proposal, proposal_args, observations), ret_fun
+
+
+def mh(trace, model, proposal, proposal_args, observation, key, num_updates):
+    """Runs MCMC alorithm"""
+    
+    # Generate the random keys for run of MCMC code
+    mh_keys = jax.random.split(key, num_updates)
+
+    # Loop through num_updates rounds
+    last_carry, mh_chain = jax.lax.scan(
+        metropolis_hastings_move,
+        (trace, model, proposal, proposal_args, observation),
+        mh_keys,
+    )
+
+    return last_carry[0], mh_chain
+
+def custom_mh(trace, model, observations, key, num_updates):
+    return mh(trace, model, prop_physics, (), observations, key, num_updates)
+
+def run_inference(model, model_args, obs, key, num_samples):
+    """ Running the model inference"""  
+    # Get the keys
+    key, subkey1, subkey2 = jax.random.split(key, 3)
+
+    tr, _ = model.importance(subkey1, obs, model_args)
+
+    rejuvenated_trace, mh_train = custom_mh(tr, model, obs, subkey2, num_samples)
+
+    return rejuvenated_trace, mh_train
+
+key = jax.random.key(0)
+
+# Unsure what to set this to
+obs = C["ll_score"].set(0.0)
+
+model_args = (5.0,)
+num_samples = 100
+key, subkey = jax.random.split(key)
+_, mh_chain = run_inference(model, model_args, obs, subkey, num_samples)

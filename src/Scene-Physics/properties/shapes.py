@@ -5,6 +5,7 @@ import newton
 import pyvista as pv
 import numpy as np
 from scipy.spatial.transform import Rotation  
+import jax.numpy as jnp
 
 from properties.material import Material
 
@@ -75,10 +76,20 @@ class Body:
         """
         Update position of mesh to in space
         """
+        try:
+            x_val = float(jnp.asarray(x).item())
+            z_val = float(jnp.asarray(z).item())
+        except:
+            x_val = float(x)
+            z_val = float(z)
+
+        # Ensures correctly converted to float
+        assert isinstance(x_val, float) and isinstance(z_val, float), "x and z must be floats"
 
         # Get rotation 
         new_quat = quat if quat is not None else wp.quat_identity()
-        new_pos = wp.vec3(float(x), 0., float(y))
+
+        new_pos = wp.vec3(x_val, 0., z_val)
 
         # Update position
         self.builder.shape_transform[self.shape_start_index] = (
