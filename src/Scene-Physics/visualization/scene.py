@@ -102,6 +102,16 @@ class Visualizer:
             far=camera_data["far"],
         )
 
+    def plot_point_maps(self, point_cloud, location):
+        pts = np.array(point_cloud).reshape(-1, 3)
+        pts[:,2] = -pts[:,2]
+        pc = pv.PolyData(pts)
+        pc.plot(
+            point_size=5,
+            style="points",
+            screenshot=location,
+        )
+
     def point_cloud(self, unprojected_depth_func, clip=True):
         """
         takes in a class that calculates camera intrinsics

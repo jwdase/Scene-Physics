@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 from genjax import ChoiceMapBuilder as C
 from genjax import gen, normal, pretty, uniform
 from genjax import Diff, NoChange, UnknownChange
+import genjax
 
 # Newton Library
 import newton
@@ -79,8 +80,9 @@ visualizer = PyVistaVisuailzer(bodies, camera_position=camera)
 visualizer.set_intrinsics(Intrinsics)
 
 # Generate png - for correct placing and point cloud
-visualizer.gen_png('recordings/initial.png')
+visualizer.gen_png('recordings/mc/initial.png')
 point_cloud = visualizer.point_cloud(unproject_depth)
+visualizer.plot_point_maps(point_cloud, 'recordings/mc/initial_point_cloud.png')
 
 class Likelihood:
     def __init__(self, initial_point_cloud):
@@ -123,116 +125,157 @@ class Likelihood:
 
 likelihood_func = Likelihood(point_cloud)
 
-def update_position_concrete(x, z):  
-    # This function runs outside JAX tracing and can use .item()  
-    x_val = float(jnp.asarray(x).item())  
-    z_val = float(jnp.asarray(z).item())  
-    # Your original B3D code here  
-    return result
+# --- 1. THE BRIDGE (Fixing the Float Issue) ---
+def physics_step_python(x_val, z_val, x=[]):
+    """ Runs Physics Step in Python"""
 
-@gen
-def model(x):
-    # Sample latent variables
-    x = uniform(-3., 3.) @ 'x'
-    z = uniform(-3., 3.) @ 'z'
+    # 1. Cast JAX arrays to standard python floats
+    x_float = float(x_val)
+    z_float = float(z_val)
 
-    # Convert into floats
-    x_input = x.astype(jnp.float32)
-    z_input = z.astype(jnp.float32)
-
-    # Update object position, and new point cloud
-    rectangle.update_position(x_input, z_input)
+    # 2. Run your imperative/object-oriented code
+    rectangle.update_position(x_float, z_float)
     point_cloud = visualizer.point_cloud(unproject_depth)
 
-    # Calc Likelihood of Placement
+    # Draw proposal
+    visualizer.gen_png(f'recordings/mc/proposal_{len(x)}.png')
+    visualizer.plot_point_maps(point_cloud, f'recordings/mc/proposal_{len(x)}_point_cloud.png')
+
+    # So we can count # of calls to the physics step
+    x.append('a')
+    
+    # 3. Calculate likelihood (score)
+    # Ensure this returns a single float
     result = likelihood_func.new_proposal_likelihood(point_cloud)
+    
+    return float(result)
 
-    # Update log_likelihood
-    log_likely = normal(0.0, 1e-6, log_prob=result) @ 'll_score'
-
+def physics_bridge(x, z):
+    """ Moves the JAX tracers to the CPU """
+    result = jax.pure_callback(
+        physics_step_python,  # The python function to call
+        jax.ShapeDtypeStruct((), jnp.float32),  # Scalar with float32 dtype
+        x, z                  # Arguments to pass
+    )
     return result
 
+# --- 2. THE GENJAX MODEL ---
 @gen
-def prop_physics(tr, *_):
-    # Get current sampled values from the previous trace
-    orig_x = tr.get_choices()["x"]
-    orig_z = tr.get_choices()["z"]
-    
-    # Propose new values using a Gaussian drift (like the notebook's MH)
-    # The standard deviation (e.g., 0.1) controls the MCMC step size.
-    x = normal(orig_x, 0.1) @ "x"
-    z = normal(orig_z, 0.1) @ "z"
-    
+def model():
+    """Defines our model with B3D likelihood"""
+    # Sample latent variables
+    x = uniform(-3.0, 3.0) @ 'x'
+    z = uniform(-3.0, 3.0) @ 'z'
+
+    # Call the bridge (this handles the "Tracer" vs "Float" issue)
+    # We pass the JAX tracer variables directly here.
+    likelihood_score = physics_bridge(x, z)
+
+    # Update log_likelihood
+    # We treat the returned score as the log probability of an observation.
+    # We observe '0.0' with a 'likelihood_score' offset to inject the density.
+    # (Note: This is a hack common in simulator-inference).
+    log_likely = normal(likelihood_score, 1.0) @ 'll_score'
+
     return x, z
 
+# --- 3. MCMC KERNEL (Manual MH Implementation) ---
+# GenJAX doesn't have a built-in metropolis_hastings function.
+# We implement it manually following the pattern from b3d/demos.
+PROPOSAL_STD = 0.1  # Standard deviation for the random walk proposal
 
-def metropolis_hastings_move(mh_args, key):
-    """ Proposes a Metropolis Hastings Move """
-
-    # Upack input values
-    trace, model, proposal, proposal_args, observations = mh_args
-    model_args = trace.get_args()
-
-    # For compute, do not differentiable
-    argdiffs = Diff.no_change(model_args)
-    proposal_args_forward = (trace, *proposal_args)
-
-    # Propose choice in forward direction
-    key, subkey = jax.random.split(key)
-    fwd_choices, fwd_weight, _ = proposal.propose(key, proposal_args_forward)
-
-    # Need update model to new trace
-    new_trace, weight, _, discard = model.update(subkey, trace, fwd_choices, argdiffs)
-
-    # Need to calculate acceptability in update
-    proposal_args_backward = (new_trace, *proposal_args)
-    bwd_weight, _ = proposal.assess(discard, proposal_args_backward)
-
-    alpha = weight - fwd_weight + bwd_weight
-    key, subkey = jax.random.split(key)
-
-    # Draw a unifrom random number, if less than alpha accepted, if not rejects
-    ret_fun = jax.lax.cond(
-        jnp.log(jax.random.uniform(subkey)) < alpha, lambda: new_trace, lambda: trace
-    )
-    return (ret_fun, model, proposal, proposal_args, observations), ret_fun
-
-
-def mh(trace, model, proposal, proposal_args, observation, key, num_updates):
-    """Runs MCMC alorithm"""
+def mh_step(key, trace):
+    """
+    Perform one Metropolis-Hastings step with a symmetric Gaussian random walk proposal.
+    """
+    key, key_prop_x, key_prop_z, key_accept = jax.random.split(key, 4)
     
-    # Generate the random keys for run of MCMC code
-    mh_keys = jax.random.split(key, num_updates)
-
-    # Loop through num_updates rounds
-    last_carry, mh_chain = jax.lax.scan(
-        metropolis_hastings_move,
-        (trace, model, proposal, proposal_args, observation),
-        mh_keys,
+    # Get current values from trace
+    current_x = trace.get_choices()['x']
+    current_z = trace.get_choices()['z']
+    
+    # Propose new values (symmetric Gaussian random walk)
+    proposed_x = genjax.normal.sample(key_prop_x, current_x, PROPOSAL_STD)
+    proposed_z = genjax.normal.sample(key_prop_z, current_z, PROPOSAL_STD)
+    
+    # For symmetric proposals: q(x'|x) = q(x|x'), so q_fwd = q_bwd and they cancel
+    # Thus we only need the model probability ratio (p_ratio from update)
+    
+    # Update trace with proposed values
+    proposed_trace, p_ratio, _, _ = trace.update(
+        key,
+        C["x"].set(proposed_x).merge(C["z"].set(proposed_z)),
+        genjax.Diff.tree_diff_no_change(trace.get_args()),
     )
+    
+    # MH acceptance ratio (symmetric proposal, so just p_ratio)
+    log_alpha = jnp.minimum(p_ratio, 0.0)  # min(p_ratio, 1) in log space
+    alpha = jnp.exp(log_alpha)
+    
+    # Accept or reject
+    accept = jax.random.bernoulli(key_accept, alpha)
+    new_trace = jax.lax.cond(accept, lambda _: proposed_trace, lambda _: trace, None)
+    
+    return new_trace, accept
 
-    return last_carry[0], mh_chain
+def metropolis_hastings_step(carry, key):
+    trace = carry
+    new_trace, _ = mh_step(key, trace)
+    return new_trace, new_trace
 
-def custom_mh(trace, model, observations, key, num_updates):
-    return mh(trace, model, prop_physics, (), observations, key, num_updates)
+# --- 4. INFERENCE LOOP ---
+def run_inference(num_samples, key):
+    key, subkey_init, subkey_scan = jax.random.split(key, 3)
 
-def run_inference(model, model_args, obs, key, num_samples):
-    """ Running the model inference"""  
-    # Get the keys
-    key, subkey1, subkey2 = jax.random.split(key, 3)
+    # 1. Constrain the likelihood score to be observed
+    # We observe 0.0 for the dummy likelihood variable
+    observations = C["ll_score"].set(0.0)
 
-    tr, _ = model.importance(subkey1, obs, model_args)
+    # 2. Generate initial trace using importance sampling
+    # The model takes no arguments, so we pass ()
+    initial_trace, _ = model.importance(subkey_init, observations, ())
 
-    rejuvenated_trace, mh_train = custom_mh(tr, model, obs, subkey2, num_samples)
+    # 3. Run the MCMC Chain
+    keys = jax.random.split(subkey_scan, num_samples)
+    
+    # Scan carries just the trace through the loop
+    final_trace, chain = jax.lax.scan(
+        metropolis_hastings_step,
+        initial_trace,
+        keys
+    )
+    
+    return chain
 
-    return rejuvenated_trace, mh_train
+# --- 5. EXECUTION ---
+if __name__ == "__main__":
+    key = jax.random.key(42)
+    
+    # JIT Compile the inference loop for speed
+    # Note: The 'pure_callback' will prevent full fusion, but the logic 
+    # around it will still be optimized.
+    jit_inference = jax.jit(run_inference, static_argnums=(0,))
+    
+    print("Compiling and running inference...")
+    traces = jit_inference(100, key)
+    
+    # Extract results from the chain of traces
+    # GenJAX traces use .get_choices() to access sampled values
+    xs = traces.get_choices()['x']
+    zs = traces.get_choices()['z']
+    
+    print(f"Sampled {len(xs)} points.")
+    print(f"X values: {xs}")
+    print(f"Z values: {zs}")
 
-key = jax.random.key(0)
+# Flow of Information
+# jax.lax.scan (lines 239-243)
+#     → metropolis_hastings_step() (line 218)
+#         → mh_step() (line 184)
+#             → trace.update()  ← MODEL RE-EXECUTED HERE
+#                 → model()
+#                     → physics_bridge(x, z)
+#                         → physics_step_python()
+#                             → likelihood_func.new_proposal_likelihood()
+#                                 → threedp3_likelihood_per_pixel_old()
 
-# Unsure what to set this to
-obs = C["ll_score"].set(0.0)
-
-model_args = (5.0,)
-num_samples = 100
-key, subkey = jax.random.split(key)
-_, mh_chain = run_inference(model, model_args, obs, subkey, num_samples)
