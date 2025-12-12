@@ -1,6 +1,6 @@
 # Add correct path for me
 from utils.io import setup_path
-setup_path('jonathan')
+setup_path('jack')
 
 # Package Import
 import pyvista
@@ -83,6 +83,14 @@ visualizer.set_intrinsics(Intrinsics)
 visualizer.gen_png('recordings/mc/initial.png')
 point_cloud = visualizer.point_cloud(unproject_depth)
 visualizer.plot_point_maps(point_cloud, 'recordings/mc/initial_point_cloud.png')
+
+# Export point cloud as PLY
+pts = np.array(point_cloud).reshape(-1, 3)
+valid_mask = (pts[:, 2] > -10) & (pts[:, 2] < 10)
+pts_valid = pts[valid_mask]
+pc_ply = pyvista.PolyData(pts_valid)
+pc_ply.save('recordings/mc/initial_point_cloud.ply')
+print(f"Saved point cloud with {len(pts_valid)} points to: recordings/mc/initial_point_cloud.ply")
 
 class Likelihood:
     def __init__(self, initial_point_cloud):

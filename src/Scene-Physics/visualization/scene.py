@@ -11,8 +11,9 @@ class Visualizer:
     """
     def __init__(self, bodies, camera_position, background_color='white'):
         self.camera_intrinsics = None
-        self.point_cloud_camera = [(1, 1.5, 3), (0, 1, 0), (0, 1, 0)]
+        # self.point_cloud_camera = [(1, 1.5, 3), (0, 1, 0), (0, 1, 0)]
 
+        self.point_cloud_camera = camera_position
         self.bodies = bodies
 
         self.camera_position = (
@@ -104,13 +105,22 @@ class Visualizer:
 
     def plot_point_maps(self, point_cloud, location):
         pts = np.array(point_cloud).reshape(-1, 3)
-        pts[:,2] = -pts[:,2]
-        pc = pv.PolyData(pts)
-        pc.plot(
-            point_size=5,
-            style="points",
-            screenshot=location,
-        )
+        
+        # Filter out invalid/far points
+        valid_mask = (pts[:, 2] > -10) & (pts[:, 2] < 10)
+        pts_valid = pts[valid_mask]
+        
+        pc = pv.PolyData(pts_valid)
+        
+        # Use a plotter with the same camera as the PNG rendering
+        plotter = pv.Plotter(off_screen=True)
+        plotter.set_background('white')
+        plotter.add_axes()
+        plotter.add_mesh(pc, color='red', point_size=3, render_points_as_spheres=True)
+        
+        # Use the same camera position as the scene rendering
+        plotter.camera_position = self.camera_position
+        plotter.screenshot(location)
 
     def point_cloud(self, unprojected_depth_func, clip=True):
         """
