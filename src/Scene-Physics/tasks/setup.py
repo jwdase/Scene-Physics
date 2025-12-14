@@ -1,4 +1,5 @@
 # Add correct path for me
+from typing import Any
 from utils.io import setup_path
 setup_path('jonathan')
 
@@ -263,11 +264,51 @@ if __name__ == "__main__":
     # GenJAX traces use .get_choices() to access sampled values
     xs = traces.get_choices()['x']
     zs = traces.get_choices()['z']
+    ll_scores = traces.get_choices()['ll_score']
+
     
     print(f"Sampled {len(xs)} points.")
     print(f"X values: {xs}")
     print(f"Z values: {zs}")
 
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    
+    # 1. Scatter plot of x vs z (posterior samples)
+    axes[0].scatter(xs, zs, alpha=0.5, s=10)
+    axes[0].set_xlabel('x')
+    axes[0].set_ylabel('z')
+    axes[0].set_title('Posterior Samples (x vs z)')
+    axes[0].axhline(y=0, color='r', linestyle='--', alpha=0.3)
+    axes[0].axvline(x=0, color='r', linestyle='--', alpha=0.3)
+    
+    # 2. Trace plot for x
+    axes[1].plot(xs)
+    axes[1].set_xlabel('MCMC Iteration')
+    axes[1].set_ylabel('x')
+    axes[1].set_title('Trace Plot: x')
+    
+    # 3. Trace plot for z
+    axes[2].plot(zs)
+    axes[2].set_xlabel('MCMC Iteration')
+    axes[2].set_ylabel('z')
+    axes[2].set_title('Trace Plot: z')
+    
+    plt.tight_layout()
+    plt.savefig('recordings/mc/results.png', dpi=150)
+    plt.show()
+    
+    print("Plot saved to recordings/mcmc_results.png")
+
+    # Plot trace plot for ll_scores
+    axes[3].plot(ll_scores)
+    axes[3].set_xlabel('MCMC Iteration')
+    axes[3].set_ylabel('ll_score')
+    axes[3].set_title('Trace Plot: ll_score')
+    
+    plt.tight_layout()
+    plt.savefig('recordings/mc/results_ll_scores.png', dpi=150)
+    plt.show()
+    
 # Flow of Information
 # jax.lax.scan (lines 239-243)
 #     → metropolis_hastings_step() (line 218)

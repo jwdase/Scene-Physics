@@ -83,7 +83,7 @@ class Body:
         # Ensures correctly converted to float
         assert isinstance(x, float) and isinstance(z, float), "x and z must be floats"
 
-        # Get rotation 
+        # Get rotation
         new_quat = quat if quat is not None else wp.quat_identity()
         new_pos = wp.vec3(x, 0., z)
 
