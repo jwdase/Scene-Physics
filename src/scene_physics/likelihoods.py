@@ -12,6 +12,8 @@ import jax
 import jax.numpy as jnp
 
 
+# The decorator allows the function to be deployed in parrallel
+# on every single pixel
 @functools.partial(
     jnp.vectorize,
     signature="(m)->()",
@@ -32,17 +34,35 @@ def _gaussian_mixture_vectorize(
     For each observed pixel, computes distances to nearby rendered pixels
     within a filter window and returns the max log probability as inlier score.
     """
+
+    # Queries what is the distance between our observed point and 
+    # the 49 points nearby defined by the filter. These are our distances
+    # note this is an approximation WE ARE NOT LOOKING for closest point 
+    # in 3D space. That would have a different result.
     distances = observed_xyz[ij[0], ij[1], :3] - jax.lax.dynamic_slice(
         rendered_xyz_padded,
         (ij[0], ij[1], 0),
         (2 * filter_size + 1, 2 * filter_size + 1, 3),
     )
+
+    # For each distance, computes the log probability which is:  
+    #       log P(dx) = -dx²/(2σ²) - log(√(2πσ²)) 
+    # Then multiplies by weight - for each rendered component that is
+    #       (1 / (H * W)) or - log(H * W)
     probabilities = jax.scipy.stats.norm.logpdf(
         distances, loc=0.0, scale=jnp.sqrt(variance)
     ).sum(-1) - jnp.log(observed_xyz.shape[0] * observed_xyz.shape[1])
 
+    # Inlier score: "If this point is an inlier, how well does the best rendered
+    # point explain it?
     inlier_score = probabilities.max() + jnp.log(1.0 - outlier_prob)
+
+    # Outlier score: "If this point is noice, it could be anywehere in the volume
     outlier_score = jnp.log(outlier_prob) - jnp.log(outlier_volume)
+
+    # Intuition on why inlier and outlier: "We could have a very low inlier score -1000
+    # which when raised to e -> 0. Thus we need a way to balance it. To do that, we add
+    # the noice prob which will dominate. Creating out probability score. 
     return {
         "pix_score": jnp.logaddexp(inlier_score, outlier_score),
         "inlier_score": inlier_score,
@@ -79,12 +99,22 @@ def threedp3_likelihood_per_pixel(
         - "inlier_score": Per-pixel inlier log score, shape (H, W)
         - "outlier_score": Per-pixel outlier log score, shape (H, W)
 
+    Point Cloud:
+        - Shape: (H, W, 3)
+        - The point cloud takes in index (x, y) and returns (X, Y, Z) which is 3D world
+          coordinates 
+        - The indexing comes from observed pixel in depth camera -> point cloud conversion
+          turns it into the new shape
+
     Example:
         >>> observed = jax.random.uniform(key, (64, 64, 3))
         >>> rendered = observed + 0.01 * jax.random.normal(key2, (64, 64, 3))
         >>> result = threedp3_likelihood_per_pixel(observed, rendered)
         >>> total_score = result["pix_score"].sum()
     """
+
+    # Adds padding for comparison (H, W, 3)
+    # +; - dimension for height and width, but not for 3rd dim
     rendered_xyz_padded = jax.lax.pad(
         rendered_xyz,
         -100.0,
@@ -94,10 +124,16 @@ def threedp3_likelihood_per_pixel(
             (0, 0, 0),
         ),
     )
+
+    # Creates all pixel coordinates so the vectorized function
+    # can work in parrallel - querying each point in OBSERVED
+    # and asking what the score is (H, W)
     jj, ii = jnp.meshgrid(
         jnp.arange(observed_xyz.shape[1]), jnp.arange(observed_xyz.shape[0])
     )
     indices = jnp.stack([ii, jj], axis=-1)
+
+
     log_probabilities = _gaussian_mixture_vectorize(
         indices,
         observed_xyz,
