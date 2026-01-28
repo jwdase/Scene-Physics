@@ -71,22 +71,6 @@ simulation_specifictation = load_stimuli_start(
     "objects/stimuli.json", "objects/local_models"
 )
 
-def setup_path(person):
-    """
-    Correctly imports the correct persons path
-    """
-    users = {'jack', 'jonathan'}
-
-    assert person in users, f"plese specify correct user, options are {users}"
-    
-    # Jack's Paths
-    if person == 'jack':
-        sys.path.append("/orcd/home/002/jacktuck/Scene-Physics/b3d/src")
-    
-    elif person == 'jonathan':
-        sys.path.append("/orcd/home/002/jwdase/projects/Scene-Physics/src/newton")
-        sys.path.append("/orcd/home/002/jwdase/genjax_tutorial/modules/b3d/src")
-
 # Plot point cloud
 def plot_point_maps(point_cloud, location):
     pts = np.array(point_cloud).reshape(-1, 3)

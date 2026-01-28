@@ -1,7 +1,3 @@
-# Adding correct path
-from utils.io import setup_path
-setup_path('jonathan')
-
 # Package Imports
 import pyvista as pv
 import warp as wp
