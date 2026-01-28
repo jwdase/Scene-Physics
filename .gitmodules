@@ -1,6 +1,6 @@
 [submodule "src/newton"]
 	path = src/newton
-	url = https://github.com/NVIDIA/newton.git
+	url = git@github.com:newton-physics/newton.git
 [submodule "src/b3d"]
 	path = src/b3d
-	url = https://github.com/probcomp/b3d/tree/main
+	url = git@github.com:probcomp/b3d.git
