@@ -1,11 +1,16 @@
+# System import
+import sys
+
 # Package Import
 import pyvista
 import warp as wp
 import numpy as np
 import jax.numpy as jnp
+import jax
+import matplotlib.pyplot as plt
 
 # b3d likelihood function
-from scene_physics.likelihoods import threedp3_likelihood_per_pixel
+from scene_physics.likelihoods import compute_likelihood_score
 from scene_physics.intrinsics import Intrinsics, unproject_depth
 
 # Newton Library
@@ -16,14 +21,52 @@ from newton.solvers import SolverXPBD
 # Files
 from scene_physics.properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
 from scene_physics.properties.material import Material
-from scene_physics.visualization.scene import VideoVisualizer
+from scene_physics.visualization.scene import PyVistaVisuailzer
 from scene_physics.utils.io import plot_point_maps
 
-# Simple Constraints
-TIME = 3
-FPS = 40
-DT= 1.0/ FPS
-NUM_FRAMES = TIME * FPS
+
+def plot_location_scores(locations, scores, save_path=None, cmap='viridis'):
+    """
+    Plot sample locations on an x-y scatter plot with color-coded likelihood scores.
+
+    Args:
+        locations: List of (x, z) tuples or numpy array of shape (N, 2)
+        scores: List or array of likelihood scores corresponding to each location
+        save_path: Optional path to save the plot (e.g., 'recordings/mc/samples.png')
+        cmap: Matplotlib colormap name for score coloring (default: 'viridis')
+
+    Returns:
+        fig, ax: Matplotlib figure and axis objects
+    """
+    locations = np.array(locations)
+    scores = np.array(scores)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    scatter = ax.scatter(
+        locations[:, 0],
+        locations[:, 1],
+        c=scores,
+        cmap=cmap,
+        s=50,
+        alpha=0.7,
+        edgecolors='black',
+        linewidths=0.5
+    )
+
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Likelihood Score')
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Z')
+    ax.set_title('Sample Locations with Likelihood Scores')
+    ax.set_aspect('equal', adjustable='box')
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    return fig, ax
+
 
 # Setup Defaults
 vec6f = wp.types.vector(length=6, dtype=float)
@@ -37,10 +80,7 @@ Ball_material = Material(mu=0.8, restitution=.3, contact_ke=2e5, contact_kd=5e3,
 Ramp_material = Material(density=0.0)
 
 # Objects
-paths = [
-    f'/home/jwdase/projects/Scene-Physics/src/scene_physics/objects/stable_scene/{val}' 
-    for val in ['table.obj', 'rectangle.obj']
-    ]
+paths = [f'objects/stable_scene/{val}' for val in ['table.obj', 'rectangle.obj']]
 
 # Placing objects
 table = MeshBody(
@@ -63,110 +103,66 @@ rectangle = MeshBody(
     material=Ramp_material,
 )
 
-# builder.particle_max_velocity = 100.0
-builder.balance_inertia = True
-builder.approximate_meshes(method="convex_hull")
-
-# Finalize Model
-model = builder.finalize()
-model.soft_contact_ke = 1e5
-
-# Start Simulator
-state_0 = model.state()
-state_1 = model.state()
-control = model.control()
-solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=100, angular_damping=.1, enable_restitution=False)
-
-# Recorder
-recorder = RecorderModelAndState()
-
-# Simulation
-for frame in range(NUM_FRAMES):
-    state_0.clear_forces()
-    contacts = model.collide(state_0)
-    solver.step(state_0, state_1, control, contacts, DT)
-    state_0, state_1 = state_1, state_0
-
-    recorder.record(state_0)
-
-    if frame % 100 == 0:
-
-        print(f"Frame {frame}/{NUM_FRAMES}")
-
-# Rendering
+# List out bodies, camera for visualizer
 bodies = [table, rectangle]
-
 camera = [
     (1, 1.5, 3),
     (0, 1, 0),
     (0, 1, 0),
 ]
 
-# Create the visualizer
-visualizer = VideoVisualizer(recorder, bodies, FPS, camera_position=camera)
-
-# Render visualization
-visualizer.render("recordings/initial_still.mp4")
-
-# Set intrinsics
+# Create visualizer and set intrinsics
+visualizer = PyVistaVisuailzer(bodies, camera_position=camera)
 visualizer.set_intrinsics(Intrinsics)
 
-# Create projection
+# Generate png - for correct placing and point cloud
+visualizer.gen_png('recordings/mc/initial.png')
 point_cloud = visualizer.point_cloud(unproject_depth)
-point_cloud2 = visualizer.point_cloud(unproject_depth, clip=False)
+visualizer.plot_point_maps(point_cloud, 'recordings/mc/initial_point_cloud.png')
+
+class Likelihood:
+    def __init__(self, initial_point_cloud):
+        self.correct_pointcloud = initial_point_cloud
+        self.control = self.get_control()
+
+    def get_control(self):
+        """ Gets the control value"""
+        return compute_likelihood_score(
+            observed_xyz=self.correct_pointcloud,
+            rendered_xyz=self.correct_pointcloud,
+            variance=0.001,
+        )
+
+    def new_proposal_likelihood(self, proposal):
+        """ Returns likelihood ration of new proposal to control"""
+        new_score = compute_likelihood_score(
+            observed_xyz=self.correct_pointcloud,
+            rendered_xyz=proposal,
+            variance=0.001,
+        )
+
+        return new_score - self.control
 
 
-small_noise = np.random.normal(0, .005, point_cloud.shape)
-large_noise = np.random.normal(0, .1, point_cloud.shape)
-
-small_noisy_point_cloud = point_cloud + small_noise
-large_noisy_point_cloud = point_cloud + large_noise
-
-plot_point_maps(small_noisy_point_cloud, 'recordings/small_noise_cloud.png')
-plot_point_maps(large_noisy_point_cloud, 'recordings/large_noise_cloud.png')
+likelihood_func = Likelihood(point_cloud)
 
 
-likelihood_control = threedp3_likelihood_per_pixel(
-    observed_xyz=point_cloud,
-    rendered_xyz=point_cloud,
-    variance=0.001,
-    outlier_prob=0.001,
-    outlier_volume=1.0,
-    filter_size=3,
-)
+print(f"Likelihood: {likelihood_func.new_proposal_likelihood(point_cloud)}")
+print(rectangle.location())
 
-likelihood_small_noise = threedp3_likelihood_per_pixel(
-    observed_xyz=point_cloud,
-    rendered_xyz=small_noisy_point_cloud,
-    variance=0.001,
-    outlier_prob=0.001,
-    outlier_volume=1.0,
-    filter_size=3,
-)
 
-likelihood_large_noise = threedp3_likelihood_per_pixel(
-    observed_xyz=point_cloud,
-    rendered_xyz=large_noisy_point_cloud,
-    variance=0.001,
-    outlier_prob=0.001,
-    outlier_volume=1.0,
-    filter_size=3,
-)
+print("=============")
+print("Running Samplined")
 
-def get_likelihood(result):
-    likelihood = result["pix_score"]
-    clean = np.array([arr[~np.isnan(arr)] for arr in likelihood])
-    score = clean.sum()
-    return score
+for i, movement in enumerate(np.linspace(-.5, .5, 10)):
+    rectangle.update_position(float(movement), 0.)
+    visualizer.gen_png(f'recordings/mc/image0{i}.png')
+    point_cloud = visualizer.point_cloud(unproject_depth)
+    likelihood = likelihood_func.new_proposal_likelihood(point_cloud)
 
-baseline_score = get_likelihood(likelihood_control)
-small_score = get_likelihood(likelihood_small_noise)
-large_score = get_likelihood(likelihood_large_noise)
+    print(f"At interval {i}; {rectangle.location()}")
 
-small_score = (small_score / baseline_score)
-large_score = (large_score / baseline_score)
+    print(f"Score of {i} is {likelihood}: location")
 
-print(f"Baseline: {baseline_score}")
 
-print(f"With small noice: {small_score}")
-print(f"With large noise: {large_score}")
+

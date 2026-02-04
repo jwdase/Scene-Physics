@@ -1,7 +1,5 @@
-# Add correct path for me
-from typing import Any
-from utils.io import setup_path
-setup_path('jack')
+# System import
+import sys
 
 # Package Import
 import pyvista
@@ -11,27 +9,64 @@ import jax.numpy as jnp
 import jax
 import matplotlib.pyplot as plt
 
-# GenJax
-from genjax import ChoiceMapBuilder as C
-from genjax import gen, normal, pretty, uniform
-from genjax import Diff, NoChange, UnknownChange
-import genjax
+# b3d likelihood function
+from scene_physics.likelihoods import compute_likelihood_score
+from scene_physics.intrinsics import Intrinsics, unproject_depth
 
 # Newton Library
 import newton
 from newton._src.utils.recorder import RecorderModelAndState
 from newton.solvers import SolverXPBD
 
-# Bayes 3D Import
-from b3d.chisight.dense.likelihoods.image_likelihoods import threedp3_likelihood_per_pixel_old
-from b3d.camera import unproject_depth, Intrinsics
-import b3d
-
 # Files
-from properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
-from properties.material import Material
-from visualization.scene import PyVistaVisuailzer
-from utils.io import plot_point_maps
+from scene_physics.properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
+from scene_physics.properties.material import Material
+from scene_physics.visualization.scene import PyVistaVisuailzer
+from scene_physics.utils.io import plot_point_maps
+
+
+def plot_location_scores(locations, scores, save_path=None, cmap='viridis'):
+    """
+    Plot sample locations on an x-y scatter plot with color-coded likelihood scores.
+
+    Args:
+        locations: List of (x, z) tuples or numpy array of shape (N, 2)
+        scores: List or array of likelihood scores corresponding to each location
+        save_path: Optional path to save the plot (e.g., 'recordings/mc/samples.png')
+        cmap: Matplotlib colormap name for score coloring (default: 'viridis')
+
+    Returns:
+        fig, ax: Matplotlib figure and axis objects
+    """
+    locations = np.array(locations)
+    scores = np.array(scores)
+
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    scatter = ax.scatter(
+        locations[:, 0],
+        locations[:, 1],
+        c=scores,
+        cmap=cmap,
+        s=50,
+        alpha=0.7,
+        edgecolors='black',
+        linewidths=0.5
+    )
+
+    cbar = plt.colorbar(scatter, ax=ax)
+    cbar.set_label('Likelihood Score')
+
+    ax.set_xlabel('X')
+    ax.set_ylabel('Z')
+    ax.set_title('Sample Locations with Likelihood Scores')
+    ax.set_aspect('equal', adjustable='box')
+
+    if save_path:
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    return fig, ax
+
 
 # Setup Defaults
 vec6f = wp.types.vector(length=6, dtype=float)
@@ -85,14 +120,6 @@ visualizer.gen_png('recordings/mc/initial.png')
 point_cloud = visualizer.point_cloud(unproject_depth)
 visualizer.plot_point_maps(point_cloud, 'recordings/mc/initial_point_cloud.png')
 
-# Export point cloud as PLY
-pts = np.array(point_cloud).reshape(-1, 3)
-valid_mask = (pts[:, 2] > -10) & (pts[:, 2] < 10)
-pts_valid = pts[valid_mask]
-pc_ply = pyvista.PolyData(pts_valid)
-pc_ply.save('recordings/mc/initial_point_cloud.ply')
-print(f"Saved point cloud with {len(pts_valid)} points to: recordings/mc/initial_point_cloud.ply")
-
 class Likelihood:
     def __init__(self, initial_point_cloud):
         self.correct_pointcloud = initial_point_cloud
@@ -100,231 +127,111 @@ class Likelihood:
 
     def get_control(self):
         """ Gets the control value"""
-        likelihood_control = threedp3_likelihood_per_pixel_old(
+        return compute_likelihood_score(
             observed_xyz=self.correct_pointcloud,
             rendered_xyz=self.correct_pointcloud,
             variance=0.001,
-            outlier_prob=0.001,
-            outlier_volume=1.0,
-            filter_size=3,
         )
 
-        return self.get_likelihood(likelihood_control)
-
-    def get_likelihood(self, result):
-        """ Code to cleanup likelihood from B3D result"""
-        likelihood = result["pix_score"]
-        clean = np.array([arr[~np.isnan(arr)] for arr in likelihood])
-        score = clean.sum()
-        return score
-
     def new_proposal_likelihood(self, proposal):
-        """ Returns likelihood of new control"""
-        new_score = threedp3_likelihood_per_pixel_old(
+        """ Returns likelihood ration of new proposal to control"""
+        new_score = compute_likelihood_score(
             observed_xyz=self.correct_pointcloud,
             rendered_xyz=proposal,
             variance=0.001,
-            outlier_prob=0.001,
-            outlier_volume=1.0,
-            filter_size=3,
         )
 
-        # [TODO] DOUBLE CHECK IF CORRECT
-        return (self.get_likelihood(new_score)) / self.control
+        return new_score - self.control
+
+class MHSampler:
+    def __init__(self, visualizer, body, likelihood, var):
+        self.visualizer = visualizer
+        self.body = body
+        self.likelihood = likelihood
+
+        self.var = var
+
+    def initial_sample(self):
+        """Sets the prior"""
+        x, y = np.random.normal(), np.random.normal()
+        self.body.update_position(x, y)
+
+    def run_sampling(self, iterations, debug=False):
+        # Saved for memory
+        positions = []
+        score = []
+
+        # Setup the initial prior
+        self.initial_sample()
+        point_cloud = self.visualizer.point_cloud(unproject_depth)
+        prev_likelihood = self.likelihood.new_proposal_likelihood(point_cloud)
+
+        # Store current values
+        x_curr, _, z_curr = self.body.get_location()
+
+        # Beg in each iteration
+        for i in range(iterations):
+            x_prop, z_prop = self.sampler(x_curr, z_curr)
+            self.body.update_position(x_prop, z_prop)
+            point_cloud = self.visualizer.point_cloud(unproject_depth)
+
+            new_likelihood = self.likelihood.new_proposal_likelihood(
+                point_cloud
+            )
+
+            log_alpha = new_likelihood - prev_likelihood
+            # Accept with prob p
+            if np.log(np.random.uniform()) < log_alpha:
+                x_curr, z_curr = x_prop, z_prop
+                prev_likelihood = new_likelihood
+            else:
+                self.body.update_position(x_curr, z_curr)
+
+            # Save accepted values (after accept/reject decision)
+            positions.append((x_curr, z_curr))
+            score.append(prev_likelihood)
+
+            # Print result
+            if debug and i % 10 == 0:
+                print(f"Current likelihood on iteration {i} is: {prev_likelihood}")
+                print(self.body.location())
+
+        return positions, score
+
+    def sampler(self, x0, z0):
+        """ Generates new proposal location"""
+
+        dx = np.random.normal(loc=x0, scale=self.var)
+        dz = np.random.normal(loc=z0, scale=self.var)
+
+        return (dx, dz)
+
 
 likelihood_func = Likelihood(point_cloud)
 
-# --- 1. THE BRIDGE (Fixing the Float Issue) ---
-def physics_step_python(x_val, z_val, x=[]):
-    """ Runs Physics Step in Python"""
 
-    # 1. Cast JAX arrays to standard python floats
-    x_float = float(x_val)
-    z_float = float(z_val)
+print(f"Likelihood: {likelihood_func.new_proposal_likelihood(point_cloud)}")
+print(rectangle.location())
 
-    # 2. Run your imperative/object-oriented code
-    rectangle.update_position(x_float, z_float)
-    point_cloud = visualizer.point_cloud(unproject_depth)
 
-    # Draw proposal
-    visualizer.gen_png(f'recordings/mc/proposal_{len(x)}.png')
-    visualizer.plot_point_maps(point_cloud, f'recordings/mc/proposal_{len(x)}_point_cloud.png')
+print("=============")
+print("Running Samplined")
 
-    # So we can count # of calls to the physics step
-    x.append('a')
-    
-    # 3. Calculate likelihood (score)
-    # Ensure this returns a single float
-    result = likelihood_func.new_proposal_likelihood(point_cloud)
-    
-    return float(result)
+sampler = MHSampler(visualizer, rectangle, likelihood_func, .2,)
+positions, scores = sampler.run_sampling(100, True)
 
-def physics_bridge(x, z):
-    """ Moves the JAX tracers to the CPU """
-    result = jax.pure_callback(
-        physics_step_python,  # The python function to call
-        jax.ShapeDtypeStruct((), jnp.float32),  # Scalar with float32 dtype
-        x, z                  # Arguments to pass
-    )
-    return result
+plot_location_scores(positions, scores, "plot.png")
 
-# --- 2. THE GENJAX MODEL ---
-@gen
-def model():
-    """Defines our model with B3D likelihood"""
-    # Sample latent variables
-    x = uniform(-3.0, 3.0) @ 'x'
-    z = uniform(-3.0, 3.0) @ 'z'
 
-    # Call the bridge (this handles the "Tracer" vs "Float" issue)
-    # We pass the JAX tracer variables directly here.
-    likelihood_score = physics_bridge(x, z)
+# for i, movement in enumerate(np.linspace(-.5, .5, 10)):
+#    rectangle.update_position(movement, 0.)
+#    visualizer.gen_png(f'recordings/mc/image0{i}.png')
+#    point_cloud = visualizer.point_cloud(unproject_depth)
+#    likelihood = likelihood_func.new_proposal_likelihood(point_cloud)
 
-    # Update log_likelihood
-    # We treat the returned score as the log probability of an observation.
-    # We observe '0.0' with a 'likelihood_score' offset to inject the density.
-    # (Note: This is a hack common in simulator-inference).
-    log_likely = normal(likelihood_score, 1.0) @ 'll_score'
+#    print(f"At interval {i}; {rectangle.location()}")
 
-    return x, z
+#    print(f"Score of {i} is {likelihood}: location")
 
-# --- 3. MCMC KERNEL (Manual MH Implementation) ---
-# GenJAX doesn't have a built-in metropolis_hastings function.
-# We implement it manually following the pattern from b3d/demos.
-PROPOSAL_STD = 0.1  # Standard deviation for the random walk proposal
 
-def mh_step(key, trace):
-    """
-    Perform one Metropolis-Hastings step with a symmetric Gaussian random walk proposal.
-    """
-    key, key_prop_x, key_prop_z, key_accept = jax.random.split(key, 4)
-    
-    # Get current values from trace
-    current_x = trace.get_choices()['x']
-    current_z = trace.get_choices()['z']
-    
-    # Propose new values (symmetric Gaussian random walk)
-    proposed_x = genjax.normal.sample(key_prop_x, current_x, PROPOSAL_STD)
-    proposed_z = genjax.normal.sample(key_prop_z, current_z, PROPOSAL_STD)
-    
-    # For symmetric proposals: q(x'|x) = q(x|x'), so q_fwd = q_bwd and they cancel
-    # Thus we only need the model probability ratio (p_ratio from update)
-    
-    # Update trace with proposed values
-    proposed_trace, p_ratio, _, _ = trace.update(
-        key,
-        C["x"].set(proposed_x).merge(C["z"].set(proposed_z)),
-        genjax.Diff.tree_diff_no_change(trace.get_args()),
-    )
-    
-    # MH acceptance ratio (symmetric proposal, so just p_ratio)
-    log_alpha = jnp.minimum(p_ratio, 0.0)  # min(p_ratio, 1) in log space
-    alpha = jnp.exp(log_alpha)
-    
-    # Accept or reject
-    accept = jax.random.bernoulli(key_accept, alpha)
-    new_trace = jax.lax.cond(accept, lambda _: proposed_trace, lambda _: trace, None)
-    
-    return new_trace, accept
-
-def metropolis_hastings_step(carry, key):
-    trace = carry
-    new_trace, _ = mh_step(key, trace)
-    return new_trace, new_trace
-
-# --- 4. INFERENCE LOOP ---
-def run_inference(num_samples, key):
-    key, subkey_init, subkey_scan = jax.random.split(key, 3)
-
-    # 1. Constrain the likelihood score to be observed
-    # We observe 0.0 for the dummy likelihood variable
-    observations = C["ll_score"].set(0.0)
-
-    # 2. Generate initial trace using importance sampling
-    # The model takes no arguments, so we pass ()
-    initial_trace, _ = model.importance(subkey_init, observations, ())
-
-    # 3. Run the MCMC Chain
-    keys = jax.random.split(subkey_scan, num_samples)
-    
-    # Scan carries just the trace through the loop
-    final_trace, chain = jax.lax.scan(
-        metropolis_hastings_step,
-        initial_trace,
-        keys
-    )
-    
-    return chain
-
-# --- 5. EXECUTION ---
-if __name__ == "__main__":
-    key = jax.random.key(42)
-    
-    # JIT Compile the inference loop for speed
-    # Note: The 'pure_callback' will prevent full fusion, but the logic 
-    # around it will still be optimized.
-    jit_inference = jax.jit(run_inference, static_argnums=(0,))
-    
-    print("Compiling and running inference...")
-    traces = jit_inference(100, key)
-    
-    # Extract results from the chain of traces
-    # GenJAX traces use .get_choices() to access sampled values
-    xs = traces.get_choices()['x']
-    zs = traces.get_choices()['z']
-    ll_scores = traces.get_choices()['ll_score']
-
-    
-    print(f"Sampled {len(xs)} points.")
-    print(f"X values: {xs}")
-    print(f"Z values: {zs}")
-
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    
-    # 1. Scatter plot of x vs z (posterior samples)
-    axes[0].scatter(xs, zs, alpha=0.5, s=10)
-    axes[0].set_xlabel('x')
-    axes[0].set_ylabel('z')
-    axes[0].set_title('Posterior Samples (x vs z)')
-    axes[0].axhline(y=0, color='r', linestyle='--', alpha=0.3)
-    axes[0].axvline(x=0, color='r', linestyle='--', alpha=0.3)
-    
-    # 2. Trace plot for x
-    axes[1].plot(xs)
-    axes[1].set_xlabel('MCMC Iteration')
-    axes[1].set_ylabel('x')
-    axes[1].set_title('Trace Plot: x')
-    
-    # 3. Trace plot for z
-    axes[2].plot(zs)
-    axes[2].set_xlabel('MCMC Iteration')
-    axes[2].set_ylabel('z')
-    axes[2].set_title('Trace Plot: z')
-    
-    plt.tight_layout()
-    plt.savefig('recordings/mc/results.png', dpi=150)
-    plt.show()
-    
-    print("Plot saved to recordings/mcmc_results.png")
-
-    # Plot trace plot for ll_scores
-    axes[3].plot(ll_scores)
-    axes[3].set_xlabel('MCMC Iteration')
-    axes[3].set_ylabel('ll_score')
-    axes[3].set_title('Trace Plot: ll_score')
-    
-    plt.tight_layout()
-    plt.savefig('recordings/mc/results_ll_scores.png', dpi=150)
-    plt.show()
-    
-# Flow of Information
-# jax.lax.scan (lines 239-243)
-#     → metropolis_hastings_step() (line 218)
-#         → mh_step() (line 184)
-#             → trace.update()  ← MODEL RE-EXECUTED HERE
-#                 → model()
-#                     → physics_bridge(x, z)
-#                         → physics_step_python()
-#                             → likelihood_func.new_proposal_likelihood()
-#                                 → threedp3_likelihood_per_pixel_old()
 

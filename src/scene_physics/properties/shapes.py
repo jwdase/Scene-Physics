@@ -34,6 +34,13 @@ class Body:
         )
 
         self.name = name
+        self.position_python = position
+
+    def location(self):
+        return f"Position of body {self.name} is {self.position_python}"
+
+    def get_location(self):
+        return self.position_python
 
     def to_pyvista_png(self):
         """ Used for extracting start position"""
@@ -86,6 +93,7 @@ class Body:
         # Get rotation
         new_quat = quat if quat is not None else wp.quat_identity()
         new_pos = wp.vec3(x, 0., z)
+        self.position_python = (x, self.position_python[1], z)
 
         # New transformation
         new_transform = wp.transform(new_pos, new_quat)
