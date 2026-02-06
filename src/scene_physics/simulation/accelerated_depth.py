@@ -1,6 +1,5 @@
 # System import
 import sys
-
 # Package Import
 import pyvista
 import warp as wp
@@ -21,46 +20,13 @@ from newton.solvers import SolverXPBD
 from newton._src.sensors.sensor_tiled_camera import SensorTiledCamera
 
 # Files
-from scene_physics.properties.shapes import Sphere, Box, MeshBody, SoftMesh, StableMesh
+from scene_physics.properties.shapes import MeshBody
 from scene_physics.properties.material import Material
 from scene_physics.visualization.scene import PyVistaVisuailzer
 from scene_physics.utils.io import plot_point_maps, save_point_cloud_ply
+from scene_physics.kernels.image_process import depth_to_point_cloud
+from scene_physics.visualization.camera import look_at_transform
 
-
-# Warp kernel for depth to point cloud conversion
-@wp.kernel(enable_backward=False)
-def depth_to_point_cloud(
-    depth_image: wp.array(dtype=wp.float32, ndim=3),
-    camera_rays: wp.array(dtype=wp.vec3f, ndim=4),
-    camera_transforms: wp.array(dtype=wp.transformf, ndim=2),
-    width: wp.int32,
-    height: wp.int32,
-    max_depth: wp.float32,
-    points: wp.array(dtype=wp.vec3f, ndim=3),
-):
-    world_idx, cam_idx, pixel_idx = wp.tid()
-
-    depth = depth_image[world_idx, cam_idx, pixel_idx]
-
-    # Skip invalid depths (background or too far)
-    if depth <= 0.0 or depth >= max_depth:
-        points[world_idx, cam_idx, pixel_idx] = wp.vec3f(wp.nan, wp.nan, wp.nan)
-        return
-
-    # Convert flat pixel index to (y, x)
-    py = pixel_idx // width
-    px = pixel_idx % width
-
-    # Get ray direction in camera space
-    ray_dir_camera = camera_rays[cam_idx, py, px, 1]
-
-    # Point in camera space = ray_direction * depth
-    point_camera = ray_dir_camera * depth
-
-    # Transform to world space
-    point_world = wp.transform_point(camera_transforms[cam_idx, world_idx], point_camera)
-
-    points[world_idx, cam_idx, pixel_idx] = point_world
 
 
 # Setup Defaults
@@ -120,36 +86,6 @@ fov_radians = np.radians(60)
 camera_rays = sensor.compute_pinhole_camera_rays(fov_radians)
 
 ## Camera Transform
-def look_at_transform(eye, target, up=np.array([0., 1., 0.])):
-    """Creates a wp.transformf that places the camera at 'eye' looking at 'target'.
-
-    Newton camera convention: looks down -Z, +Y is up, +X is right.
-    The rotation matrix columns are the camera basis vectors in world space.
-    """
-    # Forward direction (where camera looks)
-    forward = target - eye
-    forward = forward / np.linalg.norm(forward)
-
-    # Right vector (camera +X)
-    right = np.cross(forward, up)
-    right = right / np.linalg.norm(right)
-
-    # Recompute up to ensure orthogonality (camera +Y)
-    camera_up = np.cross(right, forward)
-
-    # Build rotation matrix with columns as basis vectors:
-    # Column 0: camera +X → right
-    # Column 1: camera +Y → camera_up
-    # Column 2: camera +Z → -forward (camera looks down -Z)
-    rot_matrix = np.column_stack([right, camera_up, -forward])
-    rot = Rotation.from_matrix(rot_matrix)
-    quat = rot.as_quat()  # xyzw format
-
-    return wp.transform(
-            wp.vec3(eye[0], eye[1], eye[2]),
-            wp.quat(quat[0], quat[1], quat[2], quat[3])
-    )
-
 
 eye = np.array([1.0, 1.5, 3.0])  # Match pyvista_camera
 target = np.array([0., 1., 0.])
@@ -190,7 +126,7 @@ print(f"Depth range: {depth_2d[depth_2d > 0].min():.2f} - {depth_2d.max():.2f} m
 num_worlds, num_cameras, num_pixels = depth_image.shape
 width = sensor.render_context.width
 height = sensor.render_context.height
-max_depth = 10.0  # Clip points beyond 10m
+max_depth = 5.0  # Clip points beyond 10m
 
 # Allocate output array for points
 points_gpu = wp.empty((num_worlds, num_cameras, num_pixels), dtype=wp.vec3f)
