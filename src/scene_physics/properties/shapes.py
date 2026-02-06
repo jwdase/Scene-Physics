@@ -82,7 +82,6 @@ class Body:
 
         """
         assert isinstance(x, float) and isinstance(z, float), "x and z must be floats"
-        assert self.model is not None, "Builder must be finalized"
         
         # New positions
         new_quat = quat if quat is not None else wp.quat_identity()
@@ -97,7 +96,7 @@ class Body:
         ]
         state.body_q = wp.array(body_q, dtype=wp.transformf)
 
-        return None
+        return state
 
     def update_position(self, x, z, quat=None):
         """From a proposal updates position in pyvista"""

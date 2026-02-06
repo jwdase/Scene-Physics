@@ -197,7 +197,6 @@ class MHSampler:
         """Sample initial position from standard normal prior."""
         x = float(np.random.normal())
         z = float(np.random.normal())
-        self.body.move_position_wp(state, x, z)
         return x, z
 
     def propose(self, x_curr, z_curr):
@@ -208,19 +207,22 @@ class MHSampler:
 
     def run_sampling(self, state, iterations, debug=False):
         """Run Metropolis-Hastings sampling."""
-        # Initialize from prior
+        # Initialize from prior, and more
         x_curr, z_curr = self.initial_sample(state)
-        point_cloud = self.render_fn(state)
-        prev_likelihood = self.likelihood.new_proposal_likelihood(point_cloud)
+        prop_state = self.body.move_position_wp(state, x_curr, z_curr)
 
-        positions = []
-        scores = []
+        # Generate Likelihood function
+        point_cloud = self.render_fn(prop_state)
+        prev_likelihood = self.likelihood.new_proposal_likelihood(point_cloud)
+        
+        # Saves values through iteration
+        positions, scores = [], []
 
         for i in range(iterations):
             # Propose new position
             x_prop, z_prop = self.propose(x_curr, z_curr)
-            self.body.move_position_wp(state, x_prop, z_prop)
-            point_cloud = self.render_fn(state)
+            prop_state = self.body.move_position_wp(prop_state, x_prop, z_prop)
+            point_cloud = self.render_fn(prop_state)
             new_likelihood = self.likelihood.new_proposal_likelihood(point_cloud)
 
             # MH accept/reject
