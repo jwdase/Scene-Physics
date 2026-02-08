@@ -1,4 +1,6 @@
 import warp as wp
+import numpy as np
+import jax.numpy as jnp
 
 @wp.kernel(enable_backward=False)
 def depth_to_point_cloud(
@@ -33,3 +35,24 @@ def depth_to_point_cloud(
     point_world = wp.transform_point(camera_transforms[cam_idx, world_idx], point_camera)
 
     points[world_idx, cam_idx, pixel_idx] = point_world
+
+
+def render_point_cloud(sensor, state, camera_transforms, camera_rays, depth_image, points_gpu, height, width, max_depth):
+    """Render scene and return point cloud as (H, W, 3) jnp array."""
+    sensor.render(
+        state,
+        camera_transforms,
+        camera_rays,
+        depth_image=depth_image,
+    )
+
+    wp.launch(
+        depth_to_point_cloud,
+        dim=depth_image.shape,
+        inputs=[depth_image, camera_rays, camera_transforms, width, height, max_depth],
+        outputs=[points_gpu],
+    )
+
+    points_np = points_gpu.numpy()[0, 0]  # (H*W, 3)
+    points_3d = points_np.reshape(height, width, 3)
+    return jnp.array(points_3d)

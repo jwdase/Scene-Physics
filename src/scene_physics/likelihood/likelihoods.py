@@ -102,7 +102,7 @@ def threedp3_likelihood_per_pixel(
     Point Cloud:
         - Shape: (H, W, 3)
         - The point cloud takes in index (x, y) and returns (X, Y, Z) which is 3D world
-          coordinates 
+          coordinates
         - The indexing comes from observed pixel in depth camera -> point cloud conversion
           turns it into the new shape
 
@@ -112,6 +112,11 @@ def threedp3_likelihood_per_pixel(
         >>> result = threedp3_likelihood_per_pixel(observed, rendered)
         >>> total_score = result["pix_score"].sum()
     """
+
+    # Replace NaN in rendered point cloud with far-away sentinel so those pixels
+    # get near-zero Gaussian probability instead of propagating NaN through the
+    # filter window and corrupting valid observed pixel scores.
+    rendered_xyz = jnp.where(jnp.isnan(rendered_xyz), -100.0, rendered_xyz)
 
     # Adds padding for comparison (H, W, 3)
     # +; - dimension for height and width, but not for 3rd dim
@@ -177,3 +182,24 @@ def compute_likelihood_score(
     # Filter NaN values (from invalid depth pixels)
     valid_scores = jnp.where(jnp.isnan(pix_score), 0.0, pix_score)
     return valid_scores.sum()
+
+
+class Likelihood:
+    def __init__(self, initial_point_cloud):
+        self.correct_pointcloud = initial_point_cloud
+        self.baseline_score = self._compute_baseline()
+
+    def _compute_baseline(self):
+        """Compute the self-comparison score used as normalization baseline."""
+        return compute_likelihood_score(
+            observed_xyz=self.correct_pointcloud,
+            rendered_xyz=self.correct_pointcloud,
+        )
+
+    def new_proposal_likelihood(self, proposal):
+        """Returns log-ratio of proposal likelihood to baseline."""
+        new_score = compute_likelihood_score(
+            observed_xyz=self.correct_pointcloud,
+            rendered_xyz=proposal,
+        )
+        return new_score - self.baseline_score

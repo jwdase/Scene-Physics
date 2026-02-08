@@ -1,5 +1,3 @@
-import copy
-
 import warp as wp
 from newton._src.sim.builder import ModelBuilder
 

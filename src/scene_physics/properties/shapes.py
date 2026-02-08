@@ -1,11 +1,8 @@
-import copy
-
 import warp as wp
 import newton
 import pyvista as pv
 import numpy as np
-from scipy.spatial.transform import Rotation  
-import jax.numpy as jnp
+from scipy.spatial.transform import Rotation
 
 from scene_physics.properties.material import Material
 
@@ -94,9 +91,7 @@ class Body:
             new_pos[0], new_pos[1], new_pos[2],
             new_quat[0], new_quat[1], new_quat[2], new_quat[3],
         ]
-        state.body_q = wp.array(body_q, dtype=wp.transformf)
-
-        return state
+        return wp.array(body_q, dtype=wp.transformf)
 
     def update_position(self, x, z, quat=None):
         """From a proposal updates position in pyvista"""
