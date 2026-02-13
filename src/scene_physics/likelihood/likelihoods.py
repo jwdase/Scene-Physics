@@ -11,7 +11,6 @@ import functools
 import jax
 import jax.numpy as jnp
 
-
 # The decorator allows the function to be deployed in parrallel
 # on every single pixel
 @functools.partial(
@@ -57,7 +56,7 @@ def _gaussian_mixture_vectorize(
     # point explain it?
     inlier_score = probabilities.max() + jnp.log(1.0 - outlier_prob)
 
-    # Outlier score: "If this point is noice, it could be anywehere in the volume
+    # Outlier score: "If this point is noise, it could be anywehere in the volume
     outlier_score = jnp.log(outlier_prob) - jnp.log(outlier_volume)
 
     # Intuition on why inlier and outlier: "We could have a very low inlier score -1000
@@ -203,3 +202,5 @@ class Likelihood:
             rendered_xyz=proposal,
         )
         return new_score - self.baseline_score
+
+

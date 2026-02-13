@@ -10,8 +10,8 @@ import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
 # b3d likelihood function
-from scene_physics.likelihoods import compute_likelihood_score
-from scene_physics.intrinsics import Intrinsics, unproject_depth
+from scene_physics.likelihood.likelihoods import compute_likelihood_score
+from scene_physics.likelihood.intrinsics import Intrinsics, unproject_depth
 
 # Newton Library
 import newton
