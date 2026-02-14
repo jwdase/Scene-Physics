@@ -23,7 +23,7 @@ def save_point_cloud_ply(point_cloud, location):
     print(f"Saved to: {location}")
 
 
-def render_bio(depth_image, height, width):
+def render_bio(depth_image, height, width, debug=False):
     """
     Prints information about a render to the screen,
     and returns shape of depth_image
@@ -31,11 +31,8 @@ def render_bio(depth_image, height, width):
     depth_np = depth_image.numpy()
     depth_2d = depth_np[0, 0].reshape(height, width)
 
-    # Get numpy arrays
-    depth_np = depth_image.numpy()  # Shape: (1, 1, 640*480)
-    depth_2d = depth_np[0, 0].reshape(480, 640)  # (height, width)
-
-    print(f"Depth shape: {depth_2d.shape}")
-    print(f"Depth range: {depth_2d[depth_2d > 0].min():.2f} - {depth_2d.max():.2f} m")
+    if debug:
+        print(f"Depth shape: {depth_2d.shape}")
+        print(f"Depth range: {depth_2d[depth_2d > 0].min():.2f} - {depth_2d.max():.2f} m")
 
     return depth_2d

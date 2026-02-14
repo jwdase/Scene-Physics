@@ -7,13 +7,13 @@ from scipy.spatial.transform import Rotation
 from scene_physics.properties.material import Material
 
 class Body:
-    def __init__(self, builder, position, mass, material=None, quat=None, name=None):
+    def __init__(self, builder, position=None, mass=None, material=None, quat=None, name=None):
         # Loads the builder
         self.builder = builder
 
         # Loads: Location / Mass / material properties
-        self.mass = mass 
-        self.position = wp.vec3(*position) # Starting position
+        self.mass = 0.0 if mass is None else mass
+        self.position = wp.vec3(0.,0.,0.) if position is None else wp.vec3(*position)
         self.quat = quat if quat is not None else wp.quat_identity() # Rotation
         self.cfg = Material() if material is None else material.to_cfg(builder)
         
@@ -116,7 +116,7 @@ class Body:
         return self.name
 
 class MeshBody(Body):
-    def __init__(self, builder, body, solid, scale=1.0, stable=False, **kwargs):
+    def __init__(self, builder, body, solid=True, scale=1.0, stable=False, **kwargs):
         """
         Takes in file path to mesh and then builds/adds mesh
         object
