@@ -4,6 +4,8 @@ Contains all the different Metropolis-Hasting Sampling Codes
 
 import numpy as np
 
+from scene_physics.utils.io import save_point_cloud_ply
+
 class XZ_MH_Sampler:
     """
     Used to sample (x, z) positions of likelihood for a given object
@@ -87,11 +89,15 @@ class XZ_Physics_MH_Sampler(XZ_MH_Sampler):
     self.render_fun [render_fun] - Creates the point cloud rendered on
 
     """
-    def __init__(self, body, model, likelihood, proposal_std):
+    def __init__(self, body, model, likelihood, proposal_std, watch_every=None, directory=None):
         self.body = body
         self.model = model
         self.likelihood = likelihood
         self.proposal_std = proposal_std
+
+        # Watch forward physics every n samples
+        self.watch_every = watch_every
+        self.directory = directory
 
 
     def run_sampling(self, iterations, debug=False):
@@ -112,7 +118,12 @@ class XZ_Physics_MH_Sampler(XZ_MH_Sampler):
         for i in range(iterations):
             x_prop, z_prop = self.propose(x_curr, z_curr)
             state1.body_q = self.body.move_position_wp(state0, x_prop, z_prop)
-            new_likelihood = self.likelihood.new_proposal_likelihood(state1)
+
+            # Make visualization or not
+            if self.watch_every is not None and i % self.watch_every == 0:
+                new_likelihood = self.likelihood.new_proposal_likelihood(state1, view=True, name=f"mh_{i}")
+            else:
+                new_likelihood = self.likelihood.new_proposal_likelihood(state1)
 
             log_alpha = new_likelihood - prev_likelihood
             if np.log(np.random.uniform()) < log_alpha:

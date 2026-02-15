@@ -1,5 +1,5 @@
 import warp as wp
-import numpy as np
+import jax
 import jax.numpy as jnp
 
 @wp.kernel(enable_backward=False)
@@ -53,6 +53,6 @@ def render_point_cloud(sensor, state, camera_transforms, camera_rays, depth_imag
         outputs=[points_gpu],
     )
 
-    points_np = points_gpu.numpy()[0, 0]  # (H*W, 3)
-    points_3d = points_np.reshape(height, width, 3)
-    return jnp.array(points_3d)
+    # GPU-direct transfer: Warp → JAX via DLPack (no CPU round-trip)
+    points_jax = jnp.from_dlpack(points_gpu)
+    return points_jax[0, 0].reshape(height, width, 3)
