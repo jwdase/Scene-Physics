@@ -1,13 +1,6 @@
-# System import
-import sys
 # Package Import
-import pyvista
 import warp as wp
 import numpy as np
-import jax.numpy as jnp
-import jax
-import matplotlib.pyplot as plt
-from scipy.spatial.transform import Rotation
 
 # b3d likelihood function
 from scene_physics.likelihood.likelihoods import compute_likelihood_score
@@ -21,8 +14,8 @@ from newton._src.sensors.sensor_tiled_camera import SensorTiledCamera
 
 # Files
 from scene_physics.properties.shapes import MeshBody
-from scene_physics.properties.material import Material
-from scene_physics.visualization.scene import PyVistaVisuailzer
+from scene_physics.properties.basic_materials import Dynamic_Material, Still_Material
+from scene_physics.visualization.scene import PyVistaVisualizer
 from scene_physics.utils.io import plot_point_maps, save_point_cloud_ply
 from scene_physics.kernels.image_process import depth_to_point_cloud
 from scene_physics.visualization.camera import look_at_transform
@@ -37,8 +30,8 @@ builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
 builder.add_ground_plane()
 
 # Material
-Ball_material = Material(mu=0.8, restitution=.3, contact_ke=2e5, contact_kd=5e3, density=1e3)
-Ramp_material = Material(density=0.0)
+Ball_material = Dynamic_Material
+Ramp_material = Still_Material
 
 # Objects
 paths = [f'objects/stable_scene/{val}' for val in ['table.obj', 'rectangle.obj']]
@@ -154,7 +147,7 @@ print(f"  Z: {point_cloud[:, 2].min():.2f} to {point_cloud[:, 2].max():.2f}")
 save_point_cloud_ply(point_cloud, "recordings/point_cloud.ply")
 
 # PyVista visualization of the scene
-visualizer = PyVistaVisuailzer(bodies, pyvista_camera)
+visualizer = PyVistaVisualizer(bodies, pyvista_camera)
 visualizer.gen_png("recordings/scene_render.png")
 print("Saved PyVista render to recordings/scene_render.png")
 

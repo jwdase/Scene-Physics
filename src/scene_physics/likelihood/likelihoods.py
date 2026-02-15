@@ -11,6 +11,17 @@ import functools
 import jax
 import jax.numpy as jnp
 
+# Cache for pre-computed pixel indices (keyed by (H, W))
+_indices_cache = {}
+
+def _get_pixel_indices(height, width):
+    """Return cached (H, W, 2) pixel index grid. Computed once per resolution."""
+    key = (height, width)
+    if key not in _indices_cache:
+        jj, ii = jnp.meshgrid(jnp.arange(width), jnp.arange(height))
+        _indices_cache[key] = jnp.stack([ii, jj], axis=-1)
+    return _indices_cache[key]
+
 # The decorator allows the function to be deployed in parrallel
 # on every single pixel
 @functools.partial(
@@ -129,13 +140,10 @@ def threedp3_likelihood_per_pixel(
         ),
     )
 
-    # Creates all pixel coordinates so the vectorized function
+    # Pre-computed pixel coordinates so the vectorized function
     # can work in parrallel - querying each point in OBSERVED
     # and asking what the score is (H, W)
-    jj, ii = jnp.meshgrid(
-        jnp.arange(observed_xyz.shape[1]), jnp.arange(observed_xyz.shape[0])
-    )
-    indices = jnp.stack([ii, jj], axis=-1)
+    indices = _get_pixel_indices(observed_xyz.shape[0], observed_xyz.shape[1])
 
 
     log_probabilities = _gaussian_mixture_vectorize(
@@ -150,6 +158,7 @@ def threedp3_likelihood_per_pixel(
     return log_probabilities
 
 
+@functools.partial(jax.jit, static_argnames=("variance", "outlier_prob", "outlier_volume", "filter_size"))
 def compute_likelihood_score(
     observed_xyz: jnp.ndarray,
     rendered_xyz: jnp.ndarray,

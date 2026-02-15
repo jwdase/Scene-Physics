@@ -3,7 +3,6 @@ This is used to build the physics likelihood function, it integrates forward phy
 """
 import os
 import warp as wp
-from newton import State
 from newton.solvers import SolverXPBD
 from newton._src.utils.recorder import RecorderModelAndState
 

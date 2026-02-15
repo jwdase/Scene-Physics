@@ -11,7 +11,8 @@ from scene_physics.utils.io import  save_point_cloud_ply
 from scene_physics.sampling.mh import XZ_MH_Sampler
 
 # Run to setup values — imports builder and rectangle into this namespace
-from scene_physics.utils.setup import builder, rectangle, render_bio
+from scene_physics.utils.setup import builder, rectangle
+from scene_physics.utils.io import render_bio
 
 # Set sensor and finalize model
 model = builder.finalize()

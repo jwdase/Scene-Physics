@@ -228,7 +228,7 @@ class VideoVisualizer(Visualizer):
         return plotter
 
 
-class PyVistaVisuailzer(Visualizer):
+class PyVistaVisualizer(Visualizer):
     """Class for getting png and comparisons - no simulation"""
     def __init__(self, bodies, camera_position, background_color='white'):
         super().__init__(bodies, camera_position, background_color)
