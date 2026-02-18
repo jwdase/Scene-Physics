@@ -79,7 +79,7 @@ class Body:
 
         """
         assert isinstance(x, float) and isinstance(z, float), "x and z must be floats"
-        
+
         # New positions
         new_quat = quat if quat is not None else wp.quat_identity()
         new_pos = wp.vec3(x, 0., z)
@@ -92,6 +92,50 @@ class Body:
             new_quat[0], new_quat[1], new_quat[2], new_quat[3],
         ]
         return wp.array(body_q, dtype=wp.transformf)
+
+    def move_6dof_wp(self, state, position, quat=None):
+        """
+        Update body with full 6DOF: (x, y, z) position and (qx, qy, qz, qw) quaternion.
+
+        Args:
+            state: Newton simulation state
+            position: tuple/list of (x, y, z) floats
+            quat: wp.quat or tuple (qx, qy, qz, qw), defaults to identity
+        Returns:
+            Updated wp.array for state.body_q
+        """
+        x, y, z = float(position[0]), float(position[1]), float(position[2])
+        new_quat = quat if quat is not None else wp.quat_identity()
+        if not isinstance(new_quat, wp.types.quaternion):
+            new_quat = wp.quat(float(new_quat[0]), float(new_quat[1]),
+                               float(new_quat[2]), float(new_quat[3]))
+
+        body_q = state.body_q.numpy()
+        body_q[self.shape_start_index] = [
+            x, y, z,
+            new_quat[0], new_quat[1], new_quat[2], new_quat[3],
+        ]
+        return wp.array(body_q, dtype=wp.transformf)
+
+    def move_position_in_array(self, body_q_np, position, quat=None):
+        """
+        Modify a numpy body_q array in-place at this body's index.
+
+        Used for parallel world updates where each world's body_q is a
+        different slice of the combined array.
+
+        Args:
+            body_q_np: numpy array view of state.body_q (shape: num_bodies x 7)
+            position: (x, y, z) position
+            quat: (qx, qy, qz, qw) quaternion, defaults to identity
+        """
+        x, y, z = float(position[0]), float(position[1]), float(position[2])
+        if quat is None:
+            qx, qy, qz, qw = 0.0, 0.0, 0.0, 1.0
+        else:
+            qx, qy, qz, qw = float(quat[0]), float(quat[1]), float(quat[2]), float(quat[3])
+
+        body_q_np[self.shape_start_index] = [x, y, z, qx, qy, qz, qw]
 
     def update_position(self, x, z, quat=None):
         """From a proposal updates position in pyvista"""

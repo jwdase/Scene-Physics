@@ -192,6 +192,35 @@ def compute_likelihood_score(
     return valid_scores.sum()
 
 
+@functools.partial(jax.jit, static_argnames=("variance", "outlier_prob", "outlier_volume", "filter_size"))
+def compute_likelihood_score_batch(
+    observed_xyz: jnp.ndarray,
+    rendered_xyz_batch: jnp.ndarray,
+    variance: float = 0.001,
+    outlier_prob: float = 0.001,
+    outlier_volume: float = 1.0,
+    filter_size: int = 3,
+):
+    """
+    Compute likelihood scores for N rendered point clouds against a single observed cloud.
+
+    Uses jax.vmap over the batch dimension for GPU-parallel evaluation.
+
+    Args:
+        observed_xyz: Observed point cloud, shape (H, W, 3)
+        rendered_xyz_batch: Batch of rendered point clouds, shape (N, H, W, 3)
+
+    Returns:
+        Log likelihood scores, shape (N,)
+    """
+    def _single_score(rendered_xyz):
+        return compute_likelihood_score(
+            observed_xyz, rendered_xyz, variance, outlier_prob, outlier_volume, filter_size
+        )
+
+    return jax.vmap(_single_score)(rendered_xyz_batch)
+
+
 class Likelihood:
     def __init__(self, initial_point_cloud):
         self.correct_pointcloud = initial_point_cloud
@@ -211,5 +240,20 @@ class Likelihood:
             rendered_xyz=proposal,
         )
         return new_score - self.baseline_score
+
+    def new_proposal_likelihood_batch(self, proposals_batch):
+        """Returns log-ratio of proposal likelihoods to baseline for a batch.
+
+        Args:
+            proposals_batch: (N, H, W, 3) batch of rendered point clouds
+
+        Returns:
+            jnp.array of shape (N,) with log-ratios
+        """
+        scores = compute_likelihood_score_batch(
+            observed_xyz=self.correct_pointcloud,
+            rendered_xyz_batch=proposals_batch,
+        )
+        return scores - self.baseline_score
 
 
