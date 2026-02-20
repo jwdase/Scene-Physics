@@ -1,7 +1,5 @@
 """
-6DOF proposal distribution with variance scheduling for MCMC sampling.
-
-Generates batched position + rotation proposals for parallel world evaluation.
+Generates sampling for 6DoF for each object. It uses a scheduler and applies quaternian through small angle proposed changes.
 """
 
 import numpy as np

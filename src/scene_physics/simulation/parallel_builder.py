@@ -1,6 +1,5 @@
 """
-Utility for replicating a single-world scene into N parallel worlds
-using Newton's add_builder() API for GPU-parallel physics evaluation.
+Creates multiple worlds using the Newton API. It does this by defining one Model that contains N isolated physics enviroments. Bodies in world 0 don't collide with bodies in world 1. The GPU solves all of this in one pass.
 """
 
 import newton
@@ -9,8 +8,6 @@ import warp as wp
 
 def build_parallel_worlds(base_builder_fn, num_worlds):
     """
-    Build a combined ModelBuilder with N isolated copies of a scene.
-
     The ground plane is shared across all worlds (world=-1). Each world
     gets its own copy of the scene objects, with collision isolated
     between worlds by Newton's world grouping.
@@ -42,7 +39,8 @@ def build_parallel_worlds(base_builder_fn, num_worlds):
         world_builder, bodies_dict = base_builder_fn()
 
         # Add all bodies from this world's builder into the main builder
-        main_builder.add_builder(world_builder, world=world_idx)
+        main_builder.add_builder(world_builder, world=world_idx) 
+        # TODO - Replace add_builder with  add_world
 
         # Record index mappings — each body's shape_start_index in the
         # sub-builder becomes body_offset + original_index in the combined builder
