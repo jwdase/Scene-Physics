@@ -6,6 +6,94 @@ from scipy.spatial.transform import Rotation
 
 from scene_physics.properties.material import Material
 
+class Parallel_Mesh:
+    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None):
+        
+        # Loads: Location / Mass / Material Properties
+        self.mass = 0.0 if mass is None else mass
+        self.position = wp.vec3(0.,0.,0.) if position is None else wp.vec3(*position)
+        self.quat = quat if quat is not None else wp.quat_identity() # Rotation
+        self.cfg = Material() if material is None else material.to_cfg()
+        self.name = name
+
+        # Compute the meshes
+        self.pv_mesh = self._load_mesh(body_file)
+        self.nt_mesh = self._convert_mesh()
+
+        # Information on our world
+        self.finalized = False
+        self.mw = None
+        self.allocs = []
+
+    def give_finalized_world(self, mw_f):
+        """ Updates variable names once world is finalized"""
+        self.finalized = False
+        self.mw = mw_f
+        self.allocs = np.array(self.allocs)
+
+        return None
+
+    def _get_positions(self, state=None):
+        return self.mw.body_q.numpy()[self.allocs]
+
+    def print_positions(self):
+        print(f"Object: {self.name} occupies these positions over worlds")
+
+        positions = self._get_positions()
+
+        for i in range(self.mw.num_worlds):
+            print(f"Worls {i} has position {positions[i]}")
+
+        return None
+
+    def insert_object(self, mw, i):
+        """Places object into mw at world i"""
+
+        mw.current_world = i
+        self.allocs.append(len(mw.body_q))
+
+        # Insert object
+        body = mw.add_body(xform=wp.transform(self.position, self.quat))
+        mw.add_shape_mesh(body=body, mesh=self.nt_mesh, cfg=self.cfg)
+
+        return None
+
+    @staticmethod
+    def _load_mesh(file):
+        return file if isinstance(file, pv.core.pointset.PolyData) else pv.read(file)
+    
+    def _convert_mesh(self):
+        """ Transforms mesh into a newton type"""
+        self.pv_mesh.compute_normals(inplace=True)
+        verts = self.pv_mesh.points.astype(np.float32)
+        faces = self.pv_mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+
+        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=64)
+
+    def move_6dof_wp(self, body_q_np, prop_pos):
+        """ 
+        Moves all positions that point to this object
+
+        Args:
+            body_q_np : np.array [N * objects, 7] - comes from a scene
+            prop_pos : np.array [N, 1] - all proposed new locations
+
+        Returns:
+            body_q_np : modified state of body positions
+
+        """
+
+
+        body_q_np[self.allocs] = prop_pos
+
+        return body_q_np
+        
+        
+class Parrallel_Static_Mesh(Parallel_Mesh):
+    # TODO Class for meshes that exist in all worlds
+    pass
+
+
 class Body:
     def __init__(self, builder, position=None, mass=None, material=None, quat=None, name=None):
         # Loads the builder

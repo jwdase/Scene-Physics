@@ -5,6 +5,34 @@ Creates multiple worlds using the Newton API. It does this by defining one Model
 import newton
 import warp as wp
 
+def allocate_worlds(n, stable_mesh=None):
+    """
+    Allocates n worlds following a "blueprint" - which is just a stand in for an
+    empty world
+
+    Args:
+        num_worlds : number of parrallel worlds to create
+        stable_mesh : list[StableMeshBody] list of meshes that exist in all scenes
+
+    Returns:
+        combines_builder : ModelBuilder with all worlds (not yet finalized)
+    """
+    
+    # Main builder with shared ground plane and stable mesh
+    main_builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
+    main_builder.current_world = -1
+    main_builder.add_ground_plane()
+
+    # TODO implement stable mesh insertion
+    if stable_mesh is not None:
+        pass
+
+    # Create n of these worlds
+    main_builder.replicate(newton.ModelBuilder(up_axis=newton.Axis.Y), num_worlds=n)
+
+    return main_builder
+
+
 
 def build_parallel_worlds(base_builder_fn, num_worlds):
     """

@@ -13,5 +13,5 @@ class Material:
         self.density = density
         self.is_solid = True
 
-    def to_cfg(self, builder): 
+    def to_cfg(self): 
         return ModelBuilder.ShapeConfig(restitution=self.restitution, mu=self.mu, is_solid=self.is_solid, density=self.density, has_shape_collision=True)
