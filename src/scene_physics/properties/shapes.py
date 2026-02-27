@@ -142,19 +142,19 @@ class Parallel_Mesh:
         """Return body transforms for all worlds from the finalized MultiWorld."""
         return self.mw.body_q.numpy()[self.allocs]
 
-    def move_6dof_wp(self, body_q_np, prop_pos):
+    def move_6dof_wp(self, prop_pos, scene):
         """
-        Update this object's position across all worlds in a body_q array.
+        Moves objects in scene so that we can pass it into 
+        the likelihood function
 
         Args:
-            body_q_np : np.array [total_bodies, 7] — full flattened body state
-            prop_pos  : np.array [num_worlds, 7] — proposed transforms, one per world
-
-        Returns:
-            body_q_np with this object's entries updated
+            prop_pos : np.array positions we want body at
+            scene : Newton State 
         """
-        body_q_np[self.allocs] = prop_pos
-        return body_q_np
+
+        bodies = scene.body_q.numpy()
+        bodies[self.allocs] = prop_pos
+        scene.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
 
     # ------------------------------------------------------------------
     # Debugging

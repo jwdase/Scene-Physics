@@ -36,8 +36,8 @@ class SixDOFProposal:
         self.schedule = schedule
         self.obj = obj
         self.num = self.obj.num_worlds
-        self._init_mean = 0.00
-        self._init_std = 0.05
+        self._init_mean = 0.00 # TODO better way to set
+        self._init_std = 0.05 # TODO better way to set
 
     def get_std(self, iteration, total_iterations=None):
         """Get current (pos_std, rot_std) after applying schedule."""

@@ -8,6 +8,8 @@ Objects are placed sequentially: converge object 1, freeze, then sample object 2
 import numpy as np
 import warp as wp
 
+from scene_physics.sampling.proposals import SixDOFProposal
+
 
 class ParallelPhysicsMHSampler:
     """
@@ -38,21 +40,13 @@ class ParallelPhysicsMHSampler:
         model,
         likelihood,
         placement_order,
-        world_bodies,
-        body_index_map,
-        num_worlds,
-        proposal,
+        proposal=None,
         convergence_threshold=0.8,
     ):
-        self.model = model
+        self.sample_state = model.state()
         self.likelihood = likelihood
         self.placement_order = placement_order
-        self.world_bodies = world_bodies
-        self.body_index_map = body_index_map
-        self.num_worlds = num_worlds
-        self.proposal = proposal
-        self.convergence_threshold = convergence_threshold
-
+        self.proposal = SixDOFProposal if proposal is None else proposal 
 
     def run_single_body_sampling(self, obj, iterations_per_object, init_positions=None, debug=False):
         """
@@ -66,10 +60,11 @@ class ParallelPhysicsMHSampler:
         """
 
         # Generate the proposal method, and get initial positions
-        proposor = SixDOFProposal(obj)
+        proposor = self.proposal(obj)
         initial_positions = proposor.init_positions()
-        new_positions obj.move_6dof_wp(init_positions) 
-        # TODO Create a scene and then update in location that object
+
+        # Move positions in the scene so we can run likelihood on new scene
+        obj.move_6dof_wp(init_positions, self.sample_state) 
 
         # Step 3: TODO run physics and then sample
         # Step 4: TODO Once done lock object in correct position
