@@ -30,10 +30,14 @@ class SixDOFProposal:
             Applied to both pos_std and rot_std. None = no scheduling.
     """
 
-    def __init__(self, pos_std=0.05, rot_std=0.1, schedule=None):
+    def __init__(self, obj, pos_std=0.05, rot_std=0.1, schedule=None):
         self.pos_std_base = pos_std
         self.rot_std_base = rot_std
         self.schedule = schedule
+        self.obj = obj
+        self.num = self.obj.num_worlds
+        self._init_mean = 0.00
+        self._init_std = 0.05
 
     def get_std(self, iteration, total_iterations=None):
         """Get current (pos_std, rot_std) after applying schedule."""
@@ -42,30 +46,35 @@ class SixDOFProposal:
         scale = self.schedule(iteration, total_iterations)
         return self.pos_std_base * scale, self.rot_std_base * scale
 
-    def propose_single(self, current_pos, current_quat, iteration=0, total_iterations=None):
-        """Generate a single 6DOF proposal around the current state.
+    def initial_postions(self):
+        """
+        Initilize positions for object being sampled
+
+        - Positions are on Gaussian
+        - Quaternian is vertical for right now
+        """
+
+        positions = np.zeros((self.num, 7))
+        positions[:, :3] = np.random.normal(loc=self._init_mean, scale=self._init_std, shape=(self.num, 3))
+        positions[:, 6] = 1.0
+
+        return positions
+
+
+    def propose_batch(self, current_pos, iteration=0):
+        """
+        Generate 6DOF proposals for the current object
 
         Args:
-            current_pos: (3,) array — current (x, y, z)
-            current_quat: (4,) array — current (qx, qy, qz, qw)
-            iteration: current MCMC iteration (for scheduling)
-            total_iterations: total iterations planned (for scheduling)
+            current_pos: [5, 7] array - top 5 current (x, y, z, qx, qy, qz, qw)
+            iterations: current MCMC iterations (for scheduling)
 
         Returns:
-            new_pos: (3,) numpy array
-            new_quat: (4,) numpy array in (qx, qy, qz, qw) format
+            positions: [N, 7] numpy array of options
         """
-        pos_std, rot_std = self.get_std(iteration, total_iterations)
+        return np.random.normal((self.num, 7))
 
-        # Position: Gaussian random walk
-        new_pos = np.array(current_pos, dtype=np.float64) + np.random.normal(0, pos_std, size=3)
-
-        # Rotation: small axis-angle perturbation composed with current
-        new_quat = self._perturb_rotation(current_quat, rot_std)
-
-        return new_pos.astype(np.float32), new_quat.astype(np.float32)
-
-    def propose_batch(self, current_pos, current_quat, num_proposals, iteration=0, total_iterations=None):
+    def propose_batch_dep(self, current_pos, current_quat, num_proposals, iteration=0, total_iterations=None):
         """Generate num_proposals 6DOF proposals around the current state.
 
         Args:

@@ -53,7 +53,33 @@ class ParallelPhysicsMHSampler:
         self.proposal = proposal
         self.convergence_threshold = convergence_threshold
 
-    def run_sampling(self, iterations_per_object, init_positions=None, debug=False):
+
+    def run_single_body_sampling(self, obj, iterations_per_object, init_positions=None, debug=False):
+        """
+        Run sequential placement with parallel across 1 objectn
+
+        Args:
+            iterations_per_object: number of MH iterations per body
+
+        Returns:
+            Object correctly placed
+        """
+
+        # Generate the proposal method, and get initial positions
+        proposor = SixDOFProposal(obj)
+        initial_positions = proposor.init_positions()
+        new_positions obj.move_6dof_wp(init_positions) 
+        # TODO Create a scene and then update in location that object
+
+        # Step 3: TODO run physics and then sample
+        # Step 4: TODO Once done lock object in correct position
+        pass
+
+    def run_sampling(self, debug=False):
+        pass
+
+
+    def run_sampling_dep(self, iterations_per_object, init_positions=None, debug=False):
         """
         Run sequential placement with parallel proposal evaluation.
 

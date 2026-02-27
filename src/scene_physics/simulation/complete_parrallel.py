@@ -49,38 +49,52 @@ SCENE_ROOT = os.path.join(PACKAGE_ROOT, "objects", "scene01")
 
 # ─── Scene Builder Function ──────────────────────────────────────────────────
 def make_scene01_world():
-    """Build a single-world Scene01 (no ground plane — that's added globally).
+    """
+    Build a single-world Scene01 (no ground plane — that's added globally).
 
     Returns:
-        (builder, bodies_dict) where bodies_dict maps name -> Body
+        Dict: where bodies_dict maps name -> Body
     """
 
     bowl = Parallel_Mesh(
         body_file=f"{SCENE_ROOT}/BOWL.obj",
         position=(0., 0., 0.),
+        target_position=(0., 0., 0.),
         material=Dynamic_Material,
         name="bowl",
     )
     coffee = Parallel_Mesh(
         body_file=f"{SCENE_ROOT}/COFFEE.obj",
         position=(1., 1., 1.),
+        target_position=(0., 0., 0.),
         material=Dynamic_Material,
         name="coffee",
     )
     table = Parallel_Static_Mesh(
         body_file=f"{SCENE_ROOT}/TABLE.obj",
         position=(2., 2., 2.),
+        target_position=(0., 0., 0.),
         material=Still_Material,
         name="table",
     )
 
-    return {"dynamic" : [bowl, coffee], "static" : [table]}
+    return {"observed" : [bowl, coffee], "static" : [table], "unobserved": []}
 
 
-def build_worlds(worlds, stat_obj, dyn_obj):
+def build_worlds(worlds, stat_obj, dyn_obj_ob, dyn_obj_un):
     """
     Fills each world with meshes depending on whether they're dynamic
     meshes or not, then finalizes the model
+
+    Args:
+        worlds: world builder
+        stat_obj: objects that exist in all sim and don't move
+        dyn_obj_ob: all observable objects
+        dyn_obj_un: all unobservable objects
+
+    Returns:
+        model: Our finalized model
+        objects: list of objects in order which they should be inserted
     """
 
     # Insert all static objects
@@ -89,56 +103,68 @@ def build_worlds(worlds, stat_obj, dyn_obj):
         assert isinstance(obj, Parallel_Static_Mesh), "Must be static"
         obj.insert_object_static(worlds)
 
-    # Insert all dynamic objects
+    # Insert all observed dynamic objects
     for i in range(worlds.num_worlds):
-        for obj in dyn_obj:
+        for obj in dyn_obj_ob:
+            assert isinstance(obj, Parallel_Mesh), "Must be dynamic"
+            obj.insert_object(worlds, i)
+
+
+    for i in range(worlds.num_worlds):
+        for obj in dyn_obj_un:
             assert isinstance(obj, Parallel_Mesh), "Must be dynamic"
             obj.insert_object(worlds, i)
 
     # Finalize and assign pointers to objects
     model = worlds.finalize()
-    for obj in (stat_obj + dyn_obj):
+    for obj in (stat_obj + dyn_obj_ob + dyn_obj_un):
         obj.give_finalized_world(model)
+    
+    # Take state of correct placement
+    for obj in (stat_obj + dyn_obj_ob + dyn_obj_un):
+        obj.move_to_target()
+    
+    target = model.state()
 
-    return model
+    # Hide all objects that are not static
+    for obj in (dyn_obj_ob + dyn_obj_un):
+        obj.freeze_finalized_body()
+    
+    return model, target, dyn_obj_ob + dyn_obj_un
+
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 def main(x):
+
+    print("Building Model")
     worlds = allocate_worlds(x)
     obj = make_scene01_world()
-    model = build_worlds(worlds, obj["static"], obj["dynamic"])
+    model, target_state, sample_obj = build_worlds(worlds, obj["static"], obj["observed"], obj["unobserved"])
 
-    # Initialise simulation states and solver
-    state_0 = model.state()
-    state_1 = model.state()
-    control = model.control()
 
-    solver = SolverXPBD(
-        model,
-        rigid_contact_relaxation=0.9,
-        iterations=32,
-        angular_damping=0.1,
-        enable_restitution=False,
+    print("Building Likelihood Function")
+    likelihood = Likelihood_Physics_Parallel(
+        target_state=target_state,
+        model=model,
+        wp_eye=WP_EYE,
+        wp_target=WP_TARGET,
+        num_worlds=NUM_WORLDS,
+        name=EXPERIMENT_NAME,
+        max_depth=MAX_DEPTH,
+        height=HEIGHT,
+        width=WIDTH,
     )
 
-    # Pre-allocate GPU-side history buffer — avoids per-frame CPU/GPU sync
-    num_bodies = len(model.body_q)
-    history_gpu = wp.zeros((SIM_FRAMES, num_bodies), dtype=wp.transformf, device="cuda")
+    print("Building Proposer")
+    proposal = SixDOFProposal(
+            pos_std=POS_STD,
+            rot_std=ROT_STD,
+            schedule=linear_decay,
+            )
 
-    # Forward physics simulation — 4 seconds
-    for frame in range(SIM_FRAMES):
-        state_0.clear_forces()
-        contacts = model.collide(state_0)
-        solver.step(state_0, state_1, control, contacts, SIM_DT)
-        state_0, state_1 = state_1, state_0
+    return None
 
-        wp.copy(dest=history_gpu[frame], src=state_0.body_q)  # stays on GPU
 
-        if frame % 40 == 0:
-            print(f"Frame {frame}/{SIM_FRAMES}")
-
-    # Single GPU→CPU transfer at the end
-    history = history_gpu.numpy()  # [frames, total_bodies, 7]
-
-    return model, obj, history
+if __name__ == "__main__":
+    main(NUM_WORLDS)

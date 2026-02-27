@@ -18,14 +18,10 @@ def allocate_worlds(n, stable_mesh=None):
         combines_builder : ModelBuilder with all worlds (not yet finalized)
     """
     
-    # Main builder with shared ground plane and stable mesh
+    # Main builder with shared ground plane
     main_builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
     main_builder.current_world = -1
     main_builder.add_ground_plane()
-
-    # TODO implement stable mesh insertion
-    if stable_mesh is not None:
-        pass
 
     # Create n of these worlds
     main_builder.replicate(newton.ModelBuilder(up_axis=newton.Axis.Y), num_worlds=n)
@@ -33,6 +29,21 @@ def allocate_worlds(n, stable_mesh=None):
     return main_builder
 
 
+def gen_target_scene(objects):
+    """
+    Returns the scene for the correct target scene
+    """
+
+    # Main builder with shared ground plane and stable mesh
+    builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
+    builder.add_ground_plane()
+
+    for obj in objects:
+        obj.insert_target_scene(builder)
+
+    finalized = builder.finalize()
+
+    return finalized.state()
 
 def build_parallel_worlds(base_builder_fn, num_worlds):
     """

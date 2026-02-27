@@ -16,13 +16,16 @@ class Parallel_Mesh:
     inserted into, allowing positions to be read and written by world index.
     """
 
-    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None):
+    OFF_POSITION = np.array((0., -1_000., 0.))
+
+    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None, target_position=None):
         # Physical properties
         self.mass = 0.0 if mass is None else mass
         self.position = wp.vec3(0., 0., 0.) if position is None else wp.vec3(*position)
         self.quat = quat if quat is not None else wp.quat_identity()
         self.cfg = Material().to_cfg() if material is None else material.to_cfg()
         self.name = name
+        self.target_position = wp.vec3(0., 0., 0.) if target_position is None else wp.vec3(*target_position)
 
         # Load and convert mesh representations
         self.pv_mesh = self._load_mesh(body_file)   # PyVista mesh for visualization
@@ -32,6 +35,12 @@ class Parallel_Mesh:
         self.finalized = False
         self.mw = None      # Reference to the finalized MultiWorld
         self.allocs = []    # body_q index for each world this object was inserted into
+        self.num_worlds = None
+
+        # Save whether body is toggled on in space - if not toggled then place at (0, -1000, 0)
+        self.OFF = False 
+        self.inv_mass = None
+        self.inv_inertia = None
 
     # ------------------------------------------------------------------
     # World management
@@ -46,12 +55,13 @@ class Parallel_Mesh:
         self.finalized = True
         self.mw = mw_f
         self.allocs = np.array(self.allocs)
+        self.num_worlds = self.mw.num_worlds
 
     def insert_object(self, mw, i):
         """
         Insert this body into world `i` of a MultiWorld builder.
         Records the body_q index in `allocs` so positions can be retrieved
-        later by world index.
+        later by world index
 
         Args:
             mw : Newton MultiWorld builder
@@ -62,6 +72,67 @@ class Parallel_Mesh:
 
         body = mw.add_body(xform=wp.transform(self.position, self.quat))
         mw.add_shape_mesh(body=body, mesh=self.nt_mesh, cfg=self.cfg)
+
+    def freeze_finalized_body(self):
+        """
+        Freezes all bodies at position Parallel_Mesh.OFF_POSITION. This essentially
+        removes the body from the physics simulation
+        """
+
+        assert self.finalized is True, "To freeze must finalize body first"
+        assert self.OFF is False, "Body is already frozen"
+
+        # Copy mass and then set to 0
+        inv_mass = self.mw.body_inv_mass.numpy()
+        self.inv_mass = inv_mass[self.allocs].copy()
+        inv_mass[self.allocs] = 0.0
+        self.mw.body_inv_mass = wp.array(inv_mass, dtype=wp.float32, device="cuda")
+
+        # Copy inertia and then set to 0
+        inv_inertia = self.mw.body_inv_inertia.numpy()
+        self.inv_inertia = inv_inertia[self.allocs].copy()
+        inv_inertia[self.allocs] = 0.0
+        self.mw.body_inv_inertia = wp.array(inv_inertia, dtype=wp.mat33, device="cuda")
+
+        # Move objects to new location self.OFF_POSITION
+        bodies = self.mw.body_q.numpy()
+        bodies[self.allocs, 0:3] = self.OFF_POSITION
+        self.mw.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
+        self.OFF = True
+
+    def unfreeze_finalized_body(self):
+        """
+        Moves all bodies to random areas and restores mass and inertia properties
+        """
+
+        assert self.finalized is True, "To unfreeze must finalize body first"
+        assert self.inv_mass is not None, "Must freeze before unfreezing"
+
+        # Restore inv_mass
+        inv_mass = self.mw.body_inv_mass.numpy()
+        inv_mass[self.allocs] = self.inv_mass
+        self.mw.body_inv_mass = wp.array(inv_mass, dtype=wp.float32, device="cuda")
+
+        # Restore inv_inertia
+        inv_inertia = self.mw.body_inv_inertia.numpy()
+        inv_inertia[self.allocs] = self.inv_inertia
+        self.mw.body_inv_inertia = wp.array(inv_inertia, dtype=wp.mat33, device="cuda")
+
+        # Move objects to random position
+        bodies = self.mw.body_q.numpy()
+        bodies[self.allocs, 0:3] = np.random.normal(0., scale=1., size=(len(self.allocs), 3))
+        self.mw.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
+        self.OFF = False
+
+    def move_to_target(self):
+        """
+        Makes world at index 0 generate the target scene so that we can
+        use our likelihood funciton
+        """
+        assert self.finalized is True, "Can only do on a finalized body"
+        bodies = self.mw.body_q.numpy()
+        bodies[self.allocs[0], 0:3] = np.array(self.target_position)
+        self.mw.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
 
     # ------------------------------------------------------------------
     # Position access and manipulation
