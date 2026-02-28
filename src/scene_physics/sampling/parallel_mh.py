@@ -12,28 +12,7 @@ from scene_physics.sampling.proposals import SixDOFProposal
 
 
 class ParallelPhysicsMHSampler:
-    """
-    GPU-parallel MH sampler with sequential object placement.
-
-    For each body in placement_order:
-        1. Generate num_worlds 6DOF proposals
-        2. Write each proposal into its world's body_q
-        3. Run forward physics (single solver loop, all worlds in parallel)
-        4. Batch render all worlds
-        5. Batch compute likelihoods
-        6. Select best proposal (greedy) or MH accept/reject
-        7. Freeze accepted position, move to next body
-
-    Args:
-        model: Newton model (finalized, with all parallel worlds)
-        likelihood: Likelihood_Physics_Parallel instance
-        placement_order: list of body names in order of placement
-        world_bodies: list[dict] from build_parallel_worlds — per-world body mappings
-        body_index_map: dict (world_idx, body_name) -> body_q index
-        num_worlds: number of parallel worlds
-        proposal: SixDOFProposal instance
-        convergence_threshold: normalized score threshold to stop early (0-1 range)
-    """
+    """"""
 
     def __init__(
         self,
@@ -49,7 +28,7 @@ class ParallelPhysicsMHSampler:
         self.objects = objects
         self.proposal = SixDOFProposal if proposal is None else proposal
 
-        self.iter_per_obj = 40 if iter_per_obj is None else iter_per_obj
+        self.iter_per_obj = 200 if iter_per_obj is None else iter_per_obj
 
     def run_single_body_sampling(self, obj, total_iter, physics=False, init_positions=None, debug=False):
         """
@@ -69,6 +48,7 @@ class ParallelPhysicsMHSampler:
         if init_positions is None:
             prev_positions = proposor.initial_positions()
         else:
+            # TODO Implement This
             raise NotImplementedError("Unsure how to handle init_positions") 
         
         # Move position in the scene and get score
@@ -98,10 +78,26 @@ class ParallelPhysicsMHSampler:
         Run importance sampling with parrallel proposal evalutation
         for a variety of objects
         """
-
+        
+        # Insert observed objects
+        print("============")
+        print("Non Physics Sampling")
         for obj in self.objects["observed"]:
+            print(f"Working on obj: {obj.name}")
             self.run_single_body_sampling(obj, self.iter_per_obj, physics=False)
-
+        
+        # Insert unobserved objects
+        print("============")
+        print("Physics Sampling")
         for obj in self.objects["unobserved"]:
+            print(f"Working on obj: {obj.name}")
             self.run_single_body_sampling(obj, self.iter_per_obj, physics=True)
+
+
+    def print_results(self):
+        """Prints final position of each object"""
+
+        for obj_type, obj_list in self.objects.items():
+            for obj in obj_list:
+                print(f"Object: {obj.name} was placed at {obj.final_position}")
 

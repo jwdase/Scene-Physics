@@ -40,6 +40,7 @@ class Parallel_Mesh:
         # Save whether body is toggled on in space - if not toggled then place at (0, -1000, 0)
         self.inv_mass = None
         self.inv_inertia = None
+        self.final_position = None
 
         # Variables to track body state
         self.OFF = False 
@@ -158,6 +159,7 @@ class Parallel_Mesh:
 
         # Update body so it can't move
         self.body_locked = True
+        self.final_position = positions[0]
 
 
     # ------------------------------------------------------------------

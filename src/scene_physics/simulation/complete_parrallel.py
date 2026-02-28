@@ -159,6 +159,7 @@ def main():
     print("Building Sampler")
     sampler = ParallelPhysicsMHSampler(model, likelihood, obj)
     sampler.run_sampling()
+    sampler.print_results()
 
 if __name__ == "__main__":
     main()

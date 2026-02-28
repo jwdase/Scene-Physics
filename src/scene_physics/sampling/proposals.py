@@ -17,18 +17,7 @@ def exponential_decay(iteration, half_life=50):
 
 
 class SixDOFProposal:
-    """
-    Generates batched 6DOF proposals (position + rotation) for parallel MH sampling.
-
-    Position proposals: Gaussian random walk on (x, y, z).
-    Rotation proposals: Small axis-angle perturbation composed with current rotation.
-
-    Args:
-        pos_std: initial standard deviation for position perturbation (meters)
-        rot_std: initial standard deviation for rotation perturbation (radians)
-        schedule: callable(iteration, total_iterations) -> scale_factor in (0, 1]
-            Applied to both pos_std and rot_std. None = no scheduling.
-    """
+    """"""
 
     def __init__(self, obj, pos_std=0.05, rot_std=0.1, schedule=None):
         self.pos_std_base = pos_std

@@ -4,117 +4,153 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Scene-Physics investigates whether probabilistic models can reconstruct 3D scene structure while incorporating physical properties and physics simulations. The research question: Can we build probabilistic models that take physical properties and physics into account when reconstructing the 3D structure of a scene from visual input?
+Scene-Physics investigates whether probabilistic models can reconstruct 3D scene structure while incorporating physical properties. The core idea: use GPU-parallel physics simulation to evaluate many placement proposals simultaneously, then pick the best via importance sampling.
 
-## Running Code
+## Running Scripts
 
-The `PYTHONPATH` must be set to the project root for imports to work:
-
-```bash
-PYTHONPATH=. python src/scene_physics/simulation/scenes/scene01.py
-PYTHONPATH=. python src/scene_physics/simulation/run_parallel_sampling.py
-```
-
-Scene entry points are in `src/scene_physics/simulation/scenes/` (single-world MH) and `src/scene_physics/simulation/` (parallel multi-world experiments).
-
-## Development Commands
+All scripts are run from `src/scene_physics/` using `uv run`:
 
 ```bash
-# Format code
-black .
-
-# Sort imports
-isort .
-
-# Run tests
-pytest
-
-# Run a single test file
-pytest src/path/to/test_file.py
+cd src/scene_physics
+uv run simulation/complete_parrallel.py
 ```
 
-## Dependencies
+Recordings are written to `src/scene_physics/recordings/<experiment_name>/` relative to CWD. Object mesh files are resolved from `src/scene_physics/objects/` via `__file__`-relative paths in each script, so CWD does not affect mesh loading.
 
-**Python packages:** `warp`, `newton`, `pyvista`, `jax`, `scipy`, `numpy`
-
-**External submodules:**
-- **Newton** (`src/newton/`): NVIDIA GPU-accelerated physics engine using Warp. Provides `ModelBuilder`, `SolverXPBD`, `SensorTiledCamera`.
-- **B3D/Bayes3D** (`src/b3d/`): Probabilistic inverse graphics library (JAX-based). Point cloud likelihoods have been extracted into `src/scene_physics/likelihood/likelihoods.py` to avoid the GenJax dependency for core sampling.
-
-## Architecture
-
-The main project package is `src/scene_physics/`. All imports use the `scene_physics.*` namespace.
-
-### Package Layout
-
-```
-src/scene_physics/
-  properties/       # Object representation
-  simulation/       # Physics simulation and scene setup
-  likelihood/       # Point cloud likelihood functions
-  sampling/         # MH samplers and proposals
-  kernels/          # Warp GPU kernels
-  visualization/    # PyVista rendering
-  utils/            # I/O helpers, scene builders, plotting
-  objects/          # .obj mesh files for scenes
-  recordings/       # Output: videos, images, point clouds
+Dev tooling (run from project root):
+```bash
+uv run black .
+uv run isort .
+uv run pytest
 ```
 
-### Key Classes
+## Canonical Script Structure
 
-**`properties/shapes.py`**
-- `Parallel_Mesh`: dynamic body inserted once per parallel world; tracks `allocs` (body_q indices per world) for reading/writing positions
-- `Parallel_Static_Mesh`: shared body inserted globally (world=-1) — floors, tables
-- `MeshBody`: single-world simplification of `Parallel_Mesh`
+`simulation/complete_parrallel.py` is the canonical example of how experiments are organized. Every script follows this 3-phase pattern:
 
-**`properties/material.py` / `basic_materials.py`**
-- `Material`: wraps friction (`mu`), `restitution`, `density`, `contact_ke/kd` into Newton's `ShapeConfig`
-- `Dynamic_Material`: density=1000, mu=0.8, restitution=0.3
-- `Still_Material`: density=0.0 (kinematic/static body)
+**Phase 1 — Build the world**
+```python
+worlds = allocate_worlds(NUM_WORLDS)          # N isolated physics worlds + shared ground
+obj = make_scene01_world()                     # returns {"observed": [...], "static": [...], "unobserved": [...]}
+model, target_state, _ = build_worlds(worlds, obj["static"], obj["observed"], obj["unobserved"])
+```
 
-**`simulation/parallel_builder.py`**
-- `allocate_worlds(n)`: creates a Newton `ModelBuilder` with a shared ground plane replicated across N isolated collision worlds
-- `build_parallel_worlds(base_builder_fn, num_worlds)`: calls a scene-factory function once per world and merges into a combined builder with a `body_index_map` from `(world_idx, body_name)` → `body_q` index
+**Phase 2 — Build the likelihood**
+```python
+likelihood = Likelihood_Physics_Parallel(target_state=target_state, model=model, ...)
+```
 
-**`likelihood/likelihoods.py`**
-- `compute_likelihood_score(observed_xyz, rendered_xyz)`: JIT-compiled JAX function; 3DP3-style Gaussian mixture log-likelihood over pixel-structured `(H, W, 3)` point clouds
-- `compute_likelihood_score_batch(observed_xyz, rendered_xyz_batch)`: vmapped version for `(N, H, W, 3)` batch
+**Phase 3 — Build and run the sampler**
+```python
+sampler = ParallelPhysicsMHSampler(model, likelihood, obj)
+sampler.run_sampling()
+sampler.print_results()
+```
 
-**`likelihood/likelihoods_physics.py`**
-- `Likelihood_Physics`: single-world version; runs forward physics N frames, evaluates likelihood at `eval_every` snapshots, averages
-- `Likelihood_Physics_Parallel`: N-world version; one solver loop runs all worlds in parallel, then batch-renders and batch-evaluates
+## Object Taxonomy
 
-**`kernels/image_process.py`**
-- `depth_to_point_cloud`: Warp GPU kernel converting depth images to world-space `(H, W, 3)` point clouds
-- `render_point_cloud` / `render_point_clouds_batch`: orchestrate Newton `SensorTiledCamera` → Warp kernel → JAX via DLPack (zero CPU round-trip)
+Every scene function returns a dict with three keys:
 
-**`sampling/proposals.py`**
-- `SixDOFProposal`: batched 6DOF Gaussian random-walk proposals with optional linear/exponential annealing schedule; rotations use axis-angle perturbation via scipy `Rotation`
+| Key | Type | Role |
+|-----|------|------|
+| `"observed"` | `list[Parallel_Mesh]` | Dynamic objects whose positions are sampled (visible in GT render) |
+| `"unobserved"` | `list[Parallel_Mesh]` | Dynamic objects sampled using physics (not directly visible) |
+| `"static"` | `list[Parallel_Static_Mesh]` | Kinematic objects shared across all worlds (table, floor accessories) |
 
-**`sampling/parallel_mh.py`**
-- `ParallelPhysicsMHSampler`: sequential placement MH — converges one object at a time (greedy best of N parallel proposals), then freezes it and moves to the next
+`ParallelPhysicsMHSampler.run_sampling()` uses this distinction: observed objects use `new_proposal_likelihood_still_batch` (no physics, fast), unobserved use `new_proposal_likelihood_physics_batch` (forward sim, slower).
 
-**`visualization/camera.py`**
-- `setup_depth_camera`: configures Newton `SensorTiledCamera` with a look-at transform; camera convention is -Z forward, +Y up
+## World Building Pipeline (`build_worlds`)
 
-**`visualization/scene.py`**
-- `PyVistaVisualizer` / `VideoVisualizer`: off-screen PyVista rendering to PNG or MP4 from simulation history arrays
+Order matters for `allocs` tracking:
+1. Insert static objects once (`world=-1`, shared globally)
+2. For each world index: insert all observed dynamic objects, then all unobserved
+3. `worlds.finalize()` → call `give_finalized_world(model)` on all objects (sets `obj.allocs` as numpy array and `obj.num_worlds`)
+4. Call `move_to_target()` on all objects (sets world-0 to ground-truth position)
+5. Capture `target = model.state()` — this is the ground-truth observation
+6. Call `freeze_finalized_body()` on dynamic objects (zeros inv_mass/inv_inertia, moves to `OFF_POSITION=(0,-1000,0)`)
 
-### Key Conventions
+## Key Conventions
 
-- **Coordinate system**: Y-axis up, gravity -9.81 on Y
-- **Quaternion format**: XYZW ordering throughout (Warp/Scipy convention)
-- **Body state**: `body_q` arrays have shape `[total_bodies, 7]` — `[x, y, z, qx, qy, qz, qw]`
-- **Point clouds**: structured `(H, W, 3)` arrays (pixel-indexed, not unordered); invalid/background pixels are `NaN`
-- **Warp ↔ JAX**: always use DLPack (`jnp.from_dlpack`) to transfer GPU tensors without CPU round-trips
-- **Static bodies**: `density=0.0` makes Newton treat a body as kinematic (infinite mass)
-- **Parallel worlds**: Newton isolates collision between worlds by `builder.current_world` assignment; world `-1` is shared global
-- **Recordings output**: scripts write to `recordings/<name>/` relative to the working directory (must run from project root)
+- **Quaternions**: XYZW ordering throughout (`[qx, qy, qz, qw]`). `body_q` shape is `[N_bodies, 7]` = `[x, y, z, qx, qy, qz, qw]`.
+- **Static bodies**: `density=0.0` (`Still_Material`) makes Newton treat a body as kinematic.
+- **GPU transfers**: always use `jnp.from_dlpack(warp_array)` — never `.numpy()` then back to JAX.
+- **Pixel indices**: `_get_pixel_indices` in `likelihoods.py` must return **numpy arrays** (not jnp) to avoid JAX tracer leaks across JIT compilations.
+- **Recordings**: written relative to CWD — always run from `src/scene_physics/`.
 
-### End-to-End Sampling Flow
+## Likelihood Functions
 
-1. `allocate_worlds(N)` → combined `ModelBuilder` with N isolated worlds + shared ground
-2. Insert `Parallel_Static_Mesh` objects (world=-1) and `Parallel_Mesh` objects (once per world)
-3. `model = builder.finalize()` → call `obj.give_finalized_world(model)` on all objects
-4. Construct `Likelihood_Physics_Parallel` with a ground-truth target state
-5. `ParallelPhysicsMHSampler.run_sampling()` → for each object: generate N proposals, write to `state.body_q`, run physics, batch render, batch likelihood, keep best
+Two likelihood modes live in `likelihood/likelihoods_physics.py` on `Likelihood_Physics_Parallel`:
+
+- `new_proposal_likelihood_still_batch(scene)` — batch render current positions, no physics. Returns `(num_worlds,)` numpy array of scores relative to baseline.
+- `new_proposal_likelihood_physics_batch(scene)` — run XPBD forward sim for `frames` steps, render at `eval_every` checkpoints, average. Slower but accounts for physical plausibility.
+
+Both subtract `self.baseline_score` (self-comparison of the target point cloud).
+
+## Sampler (`sampling/parallel_mh.py`)
+
+`ParallelPhysicsMHSampler` takes `objects` dict (same structure as scene function return). `run_single_body_sampling(obj, total_iter, physics=False)`:
+1. `SixDOFProposal(obj)` — uses `obj.num_worlds` to size proposals
+2. `initial_positions()` → `(num_worlds, 7)` array, identity quaternion, small Gaussian position
+3. Loop: `propose_batch` picks top-5 by score, repeats+perturbs → new `(num_worlds, 7)` proposals
+4. After loop: `place_final_position` takes best score, replicates across all worlds, locks body
+
+## Proposal (`sampling/proposals.py`)
+
+`SixDOFProposal.propose_batch(pos, scores, cur_it, total_it)`:
+- Selects top `n=5` positions by score via `np.argpartition`
+- Repeats+truncates to `num_proposals` rows
+- Adds Gaussian noise to XYZ; perturbs rotation via axis-angle composition
+
+`n=5` is hardcoded — will fail if `num_worlds < 5`.
+
+## Architecture Diagram
+
+```
+allocate_worlds(N)
+    └── ModelBuilder with N isolated collision worlds + shared ground
+         │
+         ├── Parallel_Static_Mesh.insert_object_static()  (world=-1, once)
+         └── Parallel_Mesh.insert_object(world=i)         (once per world)
+              │
+              └── worlds.finalize() → Newton Model
+                   │
+                   ├── give_finalized_world(model)  → obj.allocs, obj.num_worlds
+                   ├── move_to_target()             → world-0 = ground truth
+                   ├── model.state()                → target_state
+                   └── freeze_finalized_body()      → dynamic objects hidden
+
+Likelihood_Physics_Parallel(target_state, model)
+    └── renders target_state → correct_pointcloud (H,W,3)
+    └── baseline_score = compute_likelihood_score(correct, correct)
+
+ParallelPhysicsMHSampler.run_sampling()
+    └── for each observed obj:  run_single_body_sampling(physics=False)
+    └── for each unobserved obj: run_single_body_sampling(physics=True)
+         └── SixDOFProposal → proposals (num_worlds, 7)
+         └── obj.move_6dof_wp(proposals, sample_state)
+         └── likelihood_batch(sample_state) → (num_worlds,) scores
+         └── obj.place_final_position(best) → lock body
+```
+
+---
+
+## Next Steps / Improvements
+
+**Bugs / Fragile Code**
+- `SixDOFProposal.propose_batch` hardcodes `n=5` — crashes if `NUM_WORLDS < 5`. Should be `n = min(5, num_proposals)`.
+- `ParallelPhysicsMHSampler.print_results` iterates all keys including `"static"`, but static objects never have `final_position` set — will print `None` or error if that changes.
+- `build_worlds` inserts dynamic objects with outer loop over worlds, inner loop over objects. This means `allocs` for each object is `[world_0_idx, world_1_idx, ...]` — correct, but the insertion pattern is fragile if object order changes between world iterations.
+- `Parallel_Mesh.unfreeze_finalized_body` places bodies at a random normal position, which may overlap with other objects. Should sample from a reasonable prior (e.g., above the table).
+
+**Missing Features**
+- `init_positions` path in `run_single_body_sampling` raises `NotImplementedError` — needed for warm-starting from a previous run or prior.
+- No MH accept/reject step in `run_single_body_sampling` — currently pure importance sampling (greedy best-of-N). True MH would allow escaping local optima.
+- `SixDOFProposal._init_mean` and `_init_std` are hardcoded (`0.0`, `0.05`) — should be configurable per-object or inferred from scene bounds.
+- No convergence criterion — sampling always runs for exactly `total_iter` iterations.
+- `VideoVisualizer` / `PyVistaVisualizer` in `visualization/scene.py` are not wired into the parallel pipeline — no way to watch the sampling progress.
+
+**Quality / Infrastructure**
+- No tests exist despite `pytest` being a dev dependency. At minimum: likelihood shape tests, proposal shape tests, `build_worlds` smoke test.
+- `simulation/mh.py` (`XZ_MH_Sampler`, `XZ_Physics_MH_Sampler`) is legacy single-object 2D sampling — consider removing or archiving to reduce confusion.
+- `simulation/run_parallel_sampling.py`, `accelerated_depth.py`, `accelerated_sampling.py` appear to be older experiments — unclear if still valid.
+- `build_worlds` could become a standalone utility in `parallel_builder.py` rather than living in each experiment script.
