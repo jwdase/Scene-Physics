@@ -38,9 +38,12 @@ class Parallel_Mesh:
         self.num_worlds = None
 
         # Save whether body is toggled on in space - if not toggled then place at (0, -1000, 0)
-        self.OFF = False 
         self.inv_mass = None
         self.inv_inertia = None
+
+        # Variables to track body state
+        self.OFF = False 
+        self.body_locked = False
 
     # ------------------------------------------------------------------
     # World management
@@ -81,6 +84,7 @@ class Parallel_Mesh:
 
         assert self.finalized is True, "To freeze must finalize body first"
         assert self.OFF is False, "Body is already frozen"
+        assert self.body_locked is False, "Body is already locked"
 
         # Copy mass and then set to 0
         inv_mass = self.mw.body_inv_mass.numpy()
@@ -107,6 +111,7 @@ class Parallel_Mesh:
 
         assert self.finalized is True, "To unfreeze must finalize body first"
         assert self.inv_mass is not None, "Must freeze before unfreezing"
+        assert self.body_locked is False, "Body is already locked"
 
         # Restore inv_mass
         inv_mass = self.mw.body_inv_mass.numpy()
@@ -130,9 +135,30 @@ class Parallel_Mesh:
         use our likelihood funciton
         """
         assert self.finalized is True, "Can only do on a finalized body"
+
         bodies = self.mw.body_q.numpy()
         bodies[self.allocs[0], 0:3] = np.array(self.target_position)
         self.mw.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
+
+    def place_final_position(self, pos, score, scene):
+        """
+        Uses array of positions and score to place our object in it's 
+        final position across a variety of worlds
+        """
+
+        assert self.finalized is True, "Can only do on a finalized body"
+        assert self.body_locked is False, "Body has already been locked"
+
+        # Get top proposals 
+        top_n_indices = np.argsort(score)[-1:][::-1]
+        positions = np.repeat(pos[top_n_indices], self.num_worlds , axis=0)
+
+        # Place in world
+        self.move_6dof_wp(positions, scene)
+
+        # Update body so it can't move
+        self.body_locked = True
+
 
     # ------------------------------------------------------------------
     # Position access and manipulation
@@ -151,6 +177,8 @@ class Parallel_Mesh:
             prop_pos : np.array positions we want body at
             scene : Newton State 
         """
+
+        assert self.body_locked is False, "Body is already locked"
 
         bodies = scene.body_q.numpy()
         bodies[self.allocs] = prop_pos

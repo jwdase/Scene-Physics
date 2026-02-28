@@ -39,16 +39,19 @@ class ParallelPhysicsMHSampler:
         self,
         model,
         likelihood,
-        placement_order,
+        objects,
         proposal=None,
+        iter_per_obj=None,
         convergence_threshold=0.8,
     ):
         self.sample_state = model.state()
         self.likelihood = likelihood
-        self.placement_order = placement_order
-        self.proposal = SixDOFProposal if proposal is None else proposal 
+        self.objects = objects
+        self.proposal = SixDOFProposal if proposal is None else proposal
 
-    def run_single_body_sampling(self, obj, iterations_per_object, init_positions=None, debug=False):
+        self.iter_per_obj = 40 if iter_per_obj is None else iter_per_obj
+
+    def run_single_body_sampling(self, obj, total_iter, physics=False, init_positions=None, debug=False):
         """
         Run sequential placement with parallel across 1 objectn
 
@@ -61,131 +64,44 @@ class ParallelPhysicsMHSampler:
 
         # Generate the proposal method, and get initial positions
         proposor = self.proposal(obj)
-        initial_positions = proposor.init_positions()
 
-        # Move positions in the scene so we can run likelihood on new scene
-        obj.move_6dof_wp(init_positions, self.sample_state) 
+        # Move positions in the scene and get scores
+        if init_positions is None:
+            prev_positions = proposor.initial_positions()
+        else:
+            raise NotImplementedError("Unsure how to handle init_positions") 
+        
+        # Move position in the scene and get score
+        obj.move_6dof_wp(prev_positions, self.sample_state)
+        prev_scores = self.likelihood.new_proposal_likelihood_still_batch(self.sample_state)
 
-        # Step 3: TODO run physics and then sample
-        # Step 4: TODO Once done lock object in correct position
-        pass
+        # Run Importance Sampling
+        for iteration in range(total_iter):
+            new_positions = proposor.propose_batch(prev_positions, prev_scores, iteration, total_iter)
+            obj.move_6dof_wp(new_positions, self.sample_state)
+            
+            # Save values for new iteration
+            if physics:
+                prev_scores = self.likelihood.new_proposal_likelihood_physics_batch(self.sample_state)
+            else:
+                prev_scores = self.likelihood.new_proposal_likelihood_still_batch(self.sample_state)
+            
+            # Update for next loop
+            prev_positions = new_positions
+
+        # Save best position (TODO Build it for n bodies)
+        obj.place_final_position(prev_positions, prev_scores, self.sample_state) 
+
 
     def run_sampling(self, debug=False):
-        pass
-
-
-    def run_sampling_dep(self, iterations_per_object, init_positions=None, debug=False):
         """
-        Run sequential placement with parallel proposal evaluation.
-
-        Args:
-            iterations_per_object: number of MH iterations per body
-            init_positions: optional dict body_name -> (position, quat) for initialization.
-                If not provided, samples from a Gaussian prior.
-            debug: print progress info
-
-        Returns:
-            results: dict mapping body_name -> {
-                'position': final (3,) array,
-                'quat': final (4,) array,
-                'scores': list of scores per iteration,
-                'positions': list of (pos, quat) per iteration,
-            }
+        Run importance sampling with parrallel proposal evalutation
+        for a variety of objects
         """
-        # Create a shared initial state
-        state = self.model.state()
-        results = {}
 
-        for body_name in self.placement_order:
-            if debug:
-                print(f"\n=== Sampling body: {body_name} ===")
+        for obj in self.objects["observed"]:
+            self.run_single_body_sampling(obj, self.iter_per_obj, physics=False)
 
-            # Initialize current position
-            if init_positions and body_name in init_positions:
-                current_pos, current_quat = init_positions[body_name]
-                current_pos = np.asarray(current_pos, dtype=np.float32)
-                current_quat = np.asarray(current_quat, dtype=np.float32)
-            else:
-                current_pos = np.random.normal(0, 0.2, size=3).astype(np.float32)
-                current_pos[1] = abs(current_pos[1])  # Keep y positive (above ground)
-                current_quat = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        for obj in self.objects["unobserved"]:
+            self.run_single_body_sampling(obj, self.iter_per_obj, physics=True)
 
-            # Set initial position in all worlds
-            self._set_body_all_worlds(state, body_name, current_pos, current_quat)
-
-            # Compute initial likelihood (use world 0 as reference)
-            prev_best_score = None
-            score_history = []
-            position_history = []
-
-            for iteration in range(iterations_per_object):
-                # Generate batch of proposals
-                positions, quats = self.proposal.propose_batch(
-                    current_pos, current_quat, self.num_worlds,
-                    iteration=iteration, total_iterations=iterations_per_object,
-                )
-
-                # Write proposals into each world's body_q
-                body_q_np = state.body_q.numpy()
-                for world_idx in range(self.num_worlds):
-                    bq_idx = self.body_index_map[(world_idx, body_name)]
-                    pos = positions[world_idx]
-                    quat = quats[world_idx]
-                    body_q_np[bq_idx] = [
-                        pos[0], pos[1], pos[2],
-                        quat[0], quat[1], quat[2], quat[3],
-                    ]
-                # Single CPU->GPU transfer
-                state.body_q = wp.array(body_q_np, dtype=wp.transformf)
-
-                # Evaluate all proposals in parallel
-                scores = self.likelihood.new_proposal_likelihood_batch(state)
-
-                # Select best proposal
-                best_idx = int(np.argmax(scores))
-                best_score = float(scores[best_idx])
-
-                # Accept if better (greedy selection from parallel proposals)
-                if prev_best_score is None or best_score > prev_best_score:
-                    current_pos = positions[best_idx].copy()
-                    current_quat = quats[best_idx].copy()
-                    prev_best_score = best_score
-
-                # Update all worlds to current best for next iteration
-                self._set_body_all_worlds(state, body_name, current_pos, current_quat)
-
-                score_history.append(prev_best_score)
-                position_history.append((current_pos.copy(), current_quat.copy()))
-
-                if debug and iteration % 10 == 0:
-                    print(
-                        f"  Iter {iteration}: best_score={prev_best_score:.4f}, "
-                        f"pos=({current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f})"
-                    )
-
-            # Freeze this body at its accepted position in all worlds
-            self._set_body_all_worlds(state, body_name, current_pos, current_quat)
-
-            results[body_name] = {
-                'position': current_pos,
-                'quat': current_quat,
-                'scores': score_history,
-                'positions': position_history,
-            }
-
-            if debug:
-                print(f"  Final: pos=({current_pos[0]:.3f}, {current_pos[1]:.3f}, {current_pos[2]:.3f}), "
-                      f"score={prev_best_score:.4f}")
-
-        return results
-
-    def _set_body_all_worlds(self, state, body_name, position, quat):
-        """Set the same position/quat for a body across all worlds."""
-        body_q_np = state.body_q.numpy()
-        for world_idx in range(self.num_worlds):
-            bq_idx = self.body_index_map[(world_idx, body_name)]
-            body_q_np[bq_idx] = [
-                position[0], position[1], position[2],
-                quat[0], quat[1], quat[2], quat[3],
-            ]
-        state.body_q = wp.array(body_q_np, dtype=wp.transformf)

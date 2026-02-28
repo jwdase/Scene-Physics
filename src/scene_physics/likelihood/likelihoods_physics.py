@@ -315,7 +315,7 @@ class Likelihood_Physics_Parallel:
             rendered_xyz=self.correct_pointcloud,
         ))
 
-    def new_proposal_likelihood_batch(self, scene):
+    def new_proposal_likelihood_physics_batch(self, scene):
         """Run forward physics on all worlds, then batch render + compute likelihoods.
 
         Args:
@@ -355,3 +355,21 @@ class Likelihood_Physics_Parallel:
         # Average across eval points and subtract baseline
         avg_scores = total_scores / eval_idx
         return avg_scores - self.baseline_score
+
+    def new_proposal_likelihood_still_batch(self, scene):
+        """Batch render all worlds at their current positions, compute likelihoods.
+
+        No physics simulation — evaluates proposals exactly as placed.
+
+        Args:
+            scene: Newton state with all worlds' body_q already set to proposals
+
+        Returns:
+            numpy array of shape (num_worlds,) with likelihood scores (relative to baseline)
+        """
+        batch_clouds = self._render_batch(scene)
+        scores = compute_likelihood_score_batch(
+            observed_xyz=self.correct_pointcloud,
+            rendered_xyz_batch=batch_clouds,
+        )
+        return np.asarray(scores) - self.baseline_score

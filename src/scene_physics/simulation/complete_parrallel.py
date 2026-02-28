@@ -135,10 +135,9 @@ def build_worlds(worlds, stat_obj, dyn_obj_ob, dyn_obj_un):
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 
-def main(x):
-
+def main():
     print("Building Model")
-    worlds = allocate_worlds(x)
+    worlds = allocate_worlds(NUM_WORLDS)
     obj = make_scene01_world()
     model, target_state, sample_obj = build_worlds(worlds, obj["static"], obj["observed"], obj["unobserved"])
 
@@ -156,15 +155,13 @@ def main(x):
         width=WIDTH,
     )
 
-    print("Building Proposer")
-    proposal = SixDOFProposal(
-            pos_std=POS_STD,
-            rot_std=ROT_STD,
-            schedule=linear_decay,
-            )
-
-    return None
-
+    
+    print("Building Sampler")
+    sampler = ParallelPhysicsMHSampler(model, likelihood, obj)
+    sampler.run_sampling()
 
 if __name__ == "__main__":
-    main(NUM_WORLDS)
+    main()
+
+
+

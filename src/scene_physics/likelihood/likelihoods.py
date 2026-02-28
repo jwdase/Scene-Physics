@@ -8,6 +8,7 @@ likelihoods between observed and rendered point clouds.
 
 import functools
 
+import numpy as np
 import jax
 import jax.numpy as jnp
 
@@ -18,8 +19,8 @@ def _get_pixel_indices(height, width):
     """Return cached (H, W, 2) pixel index grid. Computed once per resolution."""
     key = (height, width)
     if key not in _indices_cache:
-        jj, ii = jnp.meshgrid(jnp.arange(width), jnp.arange(height))
-        _indices_cache[key] = jnp.stack([ii, jj], axis=-1)
+        jj, ii = np.meshgrid(np.arange(width), np.arange(height))
+        _indices_cache[key] = np.stack([ii, jj], axis=-1)
     return _indices_cache[key]
 
 # The decorator allows the function to be deployed in parrallel

@@ -46,7 +46,7 @@ class SixDOFProposal:
         scale = self.schedule(iteration, total_iterations)
         return self.pos_std_base * scale, self.rot_std_base * scale
 
-    def initial_postions(self):
+    def initial_positions(self):
         """
         Initilize positions for object being sampled
 
@@ -55,13 +55,13 @@ class SixDOFProposal:
         """
 
         positions = np.zeros((self.num, 7))
-        positions[:, :3] = np.random.normal(loc=self._init_mean, scale=self._init_std, shape=(self.num, 3))
+        positions[:, :3] = np.random.normal(loc=self._init_mean, scale=self._init_std, size=(self.num, 3))
         positions[:, 6] = 1.0
 
         return positions
 
 
-    def propose_batch(self, current_pos, iteration=0):
+    def propose_batch(self, pos, scores, cur_it, total_it):
         """
         Generate 6DOF proposals for the current object
 
@@ -72,34 +72,23 @@ class SixDOFProposal:
         Returns:
             positions: [N, 7] numpy array of options
         """
-        return np.random.normal((self.num, 7))
-
-    def propose_batch_dep(self, current_pos, current_quat, num_proposals, iteration=0, total_iterations=None):
-        """Generate num_proposals 6DOF proposals around the current state.
-
-        Args:
-            current_pos: (3,) array — current (x, y, z)
-            current_quat: (4,) array — current (qx, qy, qz, qw)
-            num_proposals: number of proposals to generate
-            iteration: current MCMC iteration (for scheduling)
-            total_iterations: total iterations planned (for scheduling)
-
-        Returns:
-            positions: (num_proposals, 3) numpy array
-            quats: (num_proposals, 4) numpy array in (qx, qy, qz, qw) format
-        """
-        pos_std, rot_std = self.get_std(iteration, total_iterations)
-
-        # Batch position proposals: Gaussian random walk
-        current_pos = np.asarray(current_pos, dtype=np.float64)
-        positions = current_pos[None, :] + np.random.normal(0, pos_std, size=(num_proposals, 3))
-
-        # Batch rotation proposals: axis-angle perturbations
-        quats = np.empty((num_proposals, 4), dtype=np.float64)
+        n = 5
+        num_proposals = self.num 
+        
+        # Get top n positions and then sample forward
+        indices = np.argpartition(scores, -n)[-n:]
+        positions = np.repeat(pos[indices], ((num_proposals // n) + 1), axis=0)
+        positions = positions[:num_proposals]
+        
+        # Apply Gaussian Noise to placement
+        pos_std, rot_std = self.get_std(cur_it, total_it)
+        positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(num_proposals, 3))
+        
+        # TODO make this in parrallel somehow
         for i in range(num_proposals):
-            quats[i] = self._perturb_rotation(current_quat, rot_std)
+            positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
 
-        return positions.astype(np.float32), quats.astype(np.float32)
+        return positions
 
     @staticmethod
     def _perturb_rotation(current_quat, rot_std):
