@@ -19,7 +19,7 @@ def exponential_decay(iteration, half_life=50):
 class SixDOFProposal:
     """"""
 
-    def __init__(self, obj, pos_std=0.05, rot_std=0.1, schedule=None):
+    def __init__(self, obj, pos_std=0.01, rot_std=0.01, schedule=None):
         self.pos_std_base = pos_std
         self.rot_std_base = rot_std
         self.schedule = schedule
@@ -45,6 +45,11 @@ class SixDOFProposal:
 
         positions = np.zeros((self.num, 7))
         positions[:, :3] = np.random.normal(loc=self._init_mean, scale=self._init_std, size=(self.num, 3))
+
+        # Ensure Y axis > 0
+        positions[:, 1] = np.abs(positions[:, 1])
+
+
         positions[:, 6] = 1.0
 
         return positions
@@ -72,6 +77,7 @@ class SixDOFProposal:
         # Apply Gaussian Noise to placement
         pos_std, rot_std = self.get_std(cur_it, total_it)
         positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(num_proposals, 3))
+
         
         # TODO make this in parrallel somehow
         for i in range(num_proposals):

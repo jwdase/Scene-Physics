@@ -19,12 +19,13 @@ from scene_physics.simulation.parallel_builder import  allocate_worlds
 from scene_physics.likelihood.likelihoods_physics import Likelihood_Physics_Parallel
 from scene_physics.sampling.proposals import SixDOFProposal, linear_decay
 from scene_physics.sampling.parallel_mh import ParallelPhysicsMHSampler
+from scene_physics.visualization.scene import PyVistaVisualizer
 from newton.solvers import SolverXPBD
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-NUM_WORLDS = 16
-ITERATIONS_PER_OBJECT = 100
+NUM_WORLDS = 20
+ITERATIONS_PER_OBJECT = 10
 POS_STD = 0.05
 ROT_STD = 0.1
 WIDTH = 640
@@ -41,6 +42,7 @@ SIM_FRAMES = SIM_SECONDS * SIM_FPS
 # Camera positions
 WP_EYE = np.array([1., 1.5, 1.])
 WP_TARGET = np.array([0., 0., 0.])
+PYVISTA_CAMERA = [(4., 4., 4.), (0., 0., 0.), (0, 1, 0)]
 
 # Object mesh paths
 PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,7 +83,7 @@ def make_scene01_world():
     return {"observed" : [bowl, coffee], "static" : [table], "unobserved": []}
 
 
-def build_worlds(worlds, stat_obj, dyn_obj_ob, dyn_obj_un):
+def build_worlds(worlds, objects):
     """
     Fills each world with meshes depending on whether they're dynamic
     meshes or not, then finalizes the model
@@ -96,41 +98,42 @@ def build_worlds(worlds, stat_obj, dyn_obj_ob, dyn_obj_un):
         model: Our finalized model
         objects: list of objects in order which they should be inserted
     """
+    all_objects = objects["static"] + objects["observed"] + objects["unobserved"]
 
     # Insert all static objects
-    for obj in stat_obj:
+    for obj in objects["static"]:
         print(type(obj))
         assert isinstance(obj, Parallel_Static_Mesh), "Must be static"
         obj.insert_object_static(worlds)
 
     # Insert all observed dynamic objects
     for i in range(worlds.num_worlds):
-        for obj in dyn_obj_ob:
+        for obj in objects["observed"]:
             assert isinstance(obj, Parallel_Mesh), "Must be dynamic"
             obj.insert_object(worlds, i)
 
 
     for i in range(worlds.num_worlds):
-        for obj in dyn_obj_un:
+        for obj in objects["unobserved"]:
             assert isinstance(obj, Parallel_Mesh), "Must be dynamic"
             obj.insert_object(worlds, i)
 
     # Finalize and assign pointers to objects
     model = worlds.finalize()
-    for obj in (stat_obj + dyn_obj_ob + dyn_obj_un):
+    for obj in all_objects:
         obj.give_finalized_world(model)
     
     # Take state of correct placement
-    for obj in (stat_obj + dyn_obj_ob + dyn_obj_un):
+    for obj in all_objects:
         obj.move_to_target()
     
     target = model.state()
 
     # Hide all objects that are not static
-    for obj in (dyn_obj_ob + dyn_obj_un):
+    for obj in (objects["observed"] + objects["unobserved"]):
         obj.freeze_finalized_body()
     
-    return model, target, dyn_obj_ob + dyn_obj_un
+    return model, target
 
 
 # ─── Main ────────────────────────────────────────────────────────────────────
@@ -139,8 +142,10 @@ def main():
     print("Building Model")
     worlds = allocate_worlds(NUM_WORLDS)
     obj = make_scene01_world()
-    model, target_state, sample_obj = build_worlds(worlds, obj["static"], obj["observed"], obj["unobserved"])
+    model, target_state = build_worlds(worlds, obj)
 
+    print("Building Visualizer")
+    visualizer = PyVistaVisualizer(obj, num_worlds=NUM_WORLDS, camera_pos=PYVISTA_CAMERA)
 
     print("Building Likelihood Function")
     likelihood = Likelihood_Physics_Parallel(
@@ -157,9 +162,15 @@ def main():
 
     
     print("Building Sampler")
-    sampler = ParallelPhysicsMHSampler(model, likelihood, obj)
-    sampler.run_sampling()
+    sampler = ParallelPhysicsMHSampler(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=f"recordings/{EXPERIMENT_NAME}/")
+
+    sampler.run_sampling(debug=True)
     sampler.print_results()
+    sampler.plot_proposal_scores()
+
+    print("Saving Final Result")
+    visualizer.show_final_scene(f"recordings/{EXPERIMENT_NAME}/final_position.png")
+    
 
 if __name__ == "__main__":
     main()

@@ -253,6 +253,14 @@ class Parallel_Mesh:
         mesh.transform(transform_matrix, inplace=True)
         return mesh
 
+    def to_pyvista_final(self, *_):
+        """Plots final scene after sampling"""
+
+        assert self.final_position is not None, "Position must be finalized before"
+        return self.pyvista_body(self.final_position)
+
+
+
     def to_pyvista(self, numpy_bd_q, world_id):
         """
         Return the mesh positioned for a given world.
@@ -270,6 +278,9 @@ class Parallel_Static_Mesh(Parallel_Mesh):
     A mesh shared across all worlds — inserted once globally rather than
     once per world. Useful for static scene elements like floors or walls.
     """
+    def __init__(self, **kwargs):
+          super().__init__(**kwargs)
+          self.final_position = np.array([0., 0., 0., 0., 0., 0., 1.])
 
     def insert_object_static(self, mw):
         """
@@ -288,7 +299,7 @@ class Parallel_Static_Mesh(Parallel_Mesh):
     def insert_object(self, mw, i):
         raise TypeError("Use insert_object_static — static meshes are inserted once for all worlds.")
 
-    def to_pyvista(self, numpy_bd_q, world_id=None):
+    def to_pyvista(self, numpy_bd_q, world_id):
         """
         Return the mesh at its single global position.
         world_id is accepted for interface compatibility but ignored.
