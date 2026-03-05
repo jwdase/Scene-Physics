@@ -106,7 +106,7 @@ class SixDOFProposal:
 
         # Clip to bounds on proposals
         positions[:, 0] = np.clip(positions[:, 0], self.x_bounds["lower"], self.x_bounds["upper"])
-        positions[:, 1] = np.clip(positions[:, 1], 0.0)
+        positions[:, 1] = np.clip(positions[:, 1], 0.0, None)
         positions[:, 2] = np.clip(positions[:, 2], self.z_bounds["lower"], self.z_bounds["upper"])
         
         # TODO make this in parrallel somehow
