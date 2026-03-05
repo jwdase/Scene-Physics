@@ -128,6 +128,7 @@ class ParallelPhysicsMHSampler:
         and then move to next object
         """
         # TODO implement
+        pass
 
 
 

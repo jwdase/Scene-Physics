@@ -94,8 +94,6 @@ class SixDOFProposal:
         Returns:
             positions: [N, 7] numpy array of options
         """
-        num_proposals = self.num 
-
         print(scores)
 
         # Calculate probabilites and select randomly
@@ -104,11 +102,15 @@ class SixDOFProposal:
         
         # Apply Gaussian Noise to placement
         pos_std, rot_std = self.get_std(cur_it, total_it)
-        positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(num_proposals, 3))
+        positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(self.num, 3))
 
+        # Clip to bounds on proposals
+        positions[:, 0] = np.clip(positions[:, 0], self.x_bounds["lower"], self.x_bounds["upper"])
+        positions[:, 1] = np.clip(positions[:, 1], 0.0)
+        positions[:, 2] = np.clip(positions[:, 2], self.z_bounds["lower"], self.z_bounds["upper"])
         
         # TODO make this in parrallel somehow
-        for i in range(num_proposals):
+        for i in range(self.num):
             positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
 
         return positions
