@@ -25,7 +25,7 @@ from newton.solvers import SolverXPBD
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 NUM_WORLDS = 20
-ITERATIONS_PER_OBJECT = 10
+ITERATIONS_PER_OBJECT = 20
 POS_STD = 0.05
 ROT_STD = 0.1
 WIDTH = 640
@@ -164,7 +164,7 @@ def main():
     print("Building Sampler")
     sampler = ParallelPhysicsMHSampler(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=f"recordings/{EXPERIMENT_NAME}/")
 
-    sampler.run_sampling(debug=True)
+    sampler.run_sampling_linear_print(debug=True)
     sampler.print_results()
     sampler.plot_proposal_scores()
 

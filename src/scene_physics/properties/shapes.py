@@ -166,6 +166,14 @@ class Parallel_Mesh:
     # Position access and manipulation
     # ------------------------------------------------------------------
 
+    def set_proposal(self):
+        """
+        Sets values for the proposer so that it can exist in dict
+        """
+        
+        # TODO implement however you see fit
+        return self
+
     def _get_positions(self):
         """Return body transforms for all worlds from the finalized MultiWorld."""
         return self.mw.body_q.numpy()[self.allocs]
