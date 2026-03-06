@@ -94,7 +94,6 @@ class SixDOFProposal:
         Returns:
             positions: [N, 7] numpy array of options
         """
-        print(scores)
 
         # Calculate probabilites and select randomly
         idx = np.random.choice(len(pos), size=self.num, p=self.prob_f(scores))

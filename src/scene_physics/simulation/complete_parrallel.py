@@ -164,11 +164,12 @@ def main():
     print("Building Sampler")
     sampler = ParallelPhysicsMHSampler(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=f"recordings/{EXPERIMENT_NAME}/")
 
-    sampler.run_sampling_linear_print(debug=True)
+    sampler.run_sampling_linear_print()
     sampler.print_results()
     sampler.plot_proposal_scores()
 
     print("Saving Final Result")
+    sampler.save_likelihoods_txt(f"recordings/{EXPERIMENT_NAME}/likelihoods.txt")
     visualizer.show_final_scene(f"recordings/{EXPERIMENT_NAME}/final_position.png")
     
 

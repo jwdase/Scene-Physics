@@ -259,7 +259,7 @@ class Likelihood_Physics_Parallel:
         self.max_depth = 10.0 if max_depth is None else max_depth
 
         # Camera setup
-        camera_intrinsics = setup_depth_camera(self.model, wp_eye, wp_target, self.width, self.height)
+        camera_intrinsics = setup_depth_camera(self.model, wp_eye, wp_target, self.width, self.height, self.num_worlds)
         self.sensor = camera_intrinsics["sensor"]
         self.camera_transforms = camera_intrinsics["camera_transforms"]
         self.camera_rays = camera_intrinsics["camera_rays"]

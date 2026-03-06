@@ -70,6 +70,7 @@ class ParallelPhysicsMHSampler:
             Object correctly placed
         """
 
+
         # Generate the proposal method, and get initial positions
         proposor = self.proposals[hash(obj)]
 
@@ -105,7 +106,7 @@ class ParallelPhysicsMHSampler:
                 self._save_proposals(location, self.sample_state)
             
             # Save proposals and values
-            if debug: self.likelihoods.append(prev_scores)
+            self.likelihoods.append(prev_scores)
 
                 
         # Save best position (TODO Build it for n bodies)
@@ -137,6 +138,9 @@ class ParallelPhysicsMHSampler:
         Run importance sampling with parrallel proposal evalutation
         for a variety of objects
         """
+
+        assert len(self.likelihoods) == 0, "Please clear likelihoods before a new run"
+
         object_num = 0
         
         # Insert observed objects
@@ -164,6 +168,20 @@ class ParallelPhysicsMHSampler:
 
 
     # ========== CLAUDE SECTION ============== 
+
+    def save_likelihoods_txt(self, path):
+        """
+        Write self.likelihoods to a plain-text file.
+
+        Each row corresponds to one sampling iteration; each column is one world.
+        Shape written: (num_iterations, num_worlds).
+
+        Args:
+            path: file path to write (e.g. "run/likelihoods.txt")
+        """
+        assert len(self.likelihoods) > 0, "No likelihoods recorded — run sampling with debug=True first"
+        scores = np.stack(self.likelihoods, axis=0)  # (num_iterations, num_worlds)
+        np.savetxt(path, scores, fmt="%.6f", header=f"shape={scores.shape} rows=iterations cols=worlds")
 
     def plot_proposal_scores(self):
         """
