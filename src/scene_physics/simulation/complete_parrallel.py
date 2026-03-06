@@ -19,7 +19,7 @@ from scene_physics.simulation.parallel_builder import  allocate_worlds
 from scene_physics.likelihood.likelihoods_physics import Likelihood_Physics_Parallel
 from scene_physics.sampling.proposals import SixDOFProposal, linear_decay
 from scene_physics.sampling.parallel_mh import ParallelPhysicsMHSampler
-from scene_physics.visualization.scene import PyVistaVisualizer
+from scene_physics.visualization.scene import PyVistaVisualizer, PhysicsVideoVisualizer
 from newton.solvers import SolverXPBD
 
 # ─── Configuration ───────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ WIDTH = 640
 HEIGHT = 480
 MAX_DEPTH = 5.0
 EXPERIMENT_NAME = "parallel_6dof"
+LOCATION = f"recordings/{EXPERIMENT_NAME}"
 
 # Physics simulation
 SIM_SECONDS = 4
@@ -160,15 +161,18 @@ def main():
 
     
     print("Building Sampler")
-    sampler = ParallelPhysicsMHSampler(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=f"recordings/{EXPERIMENT_NAME}/")
+    sampler = ParallelPhysicsMHSampler(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=LOCATION)
 
-    sampler.run_sampling_linear_print()
+    sampler.run_sampling_linear_print(debug=True)
     sampler.print_results()
     sampler.plot_proposal_scores()
 
-    print("Saving Final Result")
-    sampler.save_likelihoods_txt(f"recordings/{EXPERIMENT_NAME}/likelihoods.txt")
-    visualizer.show_final_scene(f"recordings/{EXPERIMENT_NAME}/final_position.png")
+    print("Saving .png Final Result")
+    visualizer.show_final_scene(f"{LOCATION}/final_position.png")
+
+    print("Filming Final Result")
+    video_visualizer = PhysicsVideoVisualizer(obj, FPS=SIM_FPS, camera_pos=PYVISTA_CAMERA)
+    video_visualizer.render_final_scene(f"{LOCATION}/final_state.mp4")
     
 
 if __name__ == "__main__":

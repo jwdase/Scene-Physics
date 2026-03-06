@@ -4,6 +4,10 @@ import time
 import pyvista as pv
 import numpy as np
 import jax.numpy as jnp
+import newton
+import warp as wp
+from newton.solvers import SolverXPBD
+
 
 from scene_physics.properties.shapes import Parallel_Mesh
 
@@ -83,16 +87,72 @@ class PyVistaVisualizer:
             self.gen_png(scene, name=temp_name, world_id=i)
 
 
-class VideoVisualizer(PyVistaVisualizer):
+class PhysicsVideoVisualizer(PyVistaVisualizer):
     def __init__(
-        self, history, bodies, FPS, camera_pos=None, background_color="white"
+        self, bodies, FPS, camera_pos=None, background_color="white"
     ):
-        super().__init__(bodies, camera_pos, background_color)
+        super().__init__(bodies, None, camera_pos, background_color)
 
-        self.recorder = history # np.array: [time, positions]
-        self.FPS = FPS
+    def render_final_scene(self, output_filename, frames=200, dt=0.016, fps=60):
+        """Creates a render of the final scene"""
+        
+        # Build the worlds and run physics
+        model, body_idx = self._build_worlds()
+        history = self.run_forward_physics(model, frames, dt)
 
-    def render(self, world_id=0, output_filename="scene_visualization.mp4"):
+        # Render to target destination
+        self.render(history, body_idx, output_filename, fps)
+        
+    def _build_worlds(self):
+        """ Generate our Newton world for forward physics"""
+        
+        # Ensure all bodies are finalized
+        for body in self.bodies:
+            assert body.final_position is not None, f"Body: {body.name} not finalized"
+
+        # Generate the builder
+        builder = newton.ModelBuilder(up_axis=newton.Axis.Y, gravity=-9.81)
+        builder.add_ground_plane()
+
+        # Add each individual body
+        body_idx = {}
+        for body in self.bodies:
+            body_idx[hash(body)] = len(builder.body_q)
+            b = builder.add_body(self._get_xform(body))
+            builder.add_shape_mesh(body=b, mesh=body.nt_mesh, cfg=body.cfg)
+
+        return builder.finalize(), body_idx
+
+    @staticmethod
+    def _get_xform(body):
+        """Creates x_form for body insert"""
+        pos = body.final_position  # [x, y, z, qx, qy, qz, qw]
+        return wp.transform(
+                pos[:3].tolist(),
+                wp.quat(float(pos[3]), float(pos[4]), float(pos[5]), float(pos[6])),
+            )
+
+    def run_forward_physics(self, model, frames, dt):
+        """Runs forward physics and generates a history of the movement"""
+
+        solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=4, angular_damping=0.1, enable_restitution=False)
+        control = model.control()
+
+        state_0 = model.state()
+        state_1 = model.state()
+
+        # Run forward sim, collecting body_q snapshots
+        history = [state_0.body_q.numpy().copy()]
+        for _ in range(frames):
+            state_0.clear_forces()
+            contacts = model.collide(state_0)
+            solver.step(state_0, state_1, control, contacts, dt)
+            history.append(state_1.body_q.numpy().copy())
+            state_0, state_1 = state_1, state_0
+
+        return history
+
+    def render(self, history, body_idx, output_filename, fps):
         plotter = pv.Plotter(off_screen=True)
         plotter.set_background(self.background_color)
         plotter.add_axes()
@@ -102,29 +162,28 @@ class VideoVisualizer(PyVistaVisualizer):
         plotter.add_mesh(plane, color="lightgray", opacity=0.8)
 
         # Plotter position and initial state
-        plotter.camera_position = self.camera_pos  # Fix 1
-        initial_state = self.recorder[0, :]
-
+        plotter.camera_position = self.camera_pos
+        
+        # Insert Actors
         actors = []
         for i, body in enumerate(self.bodies):
             actor = plotter.add_mesh(
-                body.to_pyvista(initial_state, world_id),
+                body.pyvista_body(history[0][body_idx[hash(body)]]),
                 color=self.color[i],
                 smooth_shading=True,
             )
-            actors.append(actor)
-
-        plotter.open_movie(output_filename, framerate=self.FPS, quality=9)
-
-        for frame_idx in range(int(self.recorder.shape[0])):  # Fix 4: added colon
-            for i, actor in enumerate(actors):
-                temp_mesh = self.bodies[i].to_pyvista(self.recorder[frame_idx], world_id)  # Fix 5: removed trailing comma
+            actors.append((actor, body))
+        
+        # Run each frame
+        plotter.open_movie(output_filename, framerate=fps, quality=9)
+        for frame_idx in range(len(history)):
+            for i, (actor, body) in enumerate(actors):
+                temp_mesh = self.bodies[i].pyvista_body(history[frame_idx][body_idx[hash(body)]])
                 actor.mapper.SetInputData(temp_mesh)
-
             plotter.write_frame()
 
             if frame_idx % 50 == 0:
-                print(f"Rendering frame {frame_idx}/{self.recorder.shape[0]}")  # Fix 6: use shape[0]
+                print(f"Rendering frame {frame_idx}/{len(history)}")
 
         plotter.close()
 

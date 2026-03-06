@@ -9,7 +9,6 @@ from newton._src.utils.recorder import RecorderModelAndState
 
 from scene_physics.likelihood.likelihoods import compute_likelihood_score, compute_likelihood_score_batch
 from scene_physics.kernels.image_process import render_point_cloud, render_point_clouds_batch
-from scene_physics.visualization.scene import VideoVisualizer
 from scene_physics.visualization.camera import setup_depth_camera
 from scene_physics.utils.io import save_point_cloud_ply
 
