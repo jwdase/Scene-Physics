@@ -80,7 +80,7 @@ def make_scene01_world():
         name="table",
     )
 
-    return {"observed" : [bowl, coffee], "static" : [table], "unobserved": []}
+    return {"observed" : [bowl], "static" : [table], "unobserved": [coffee]}
 
 
 def build_worlds(worlds, objects):
@@ -112,8 +112,6 @@ def build_worlds(worlds, objects):
             assert isinstance(obj, Parallel_Mesh), "Must be dynamic"
             obj.insert_object(worlds, i)
 
-
-    for i in range(worlds.num_worlds):
         for obj in objects["unobserved"]:
             assert isinstance(obj, Parallel_Mesh), "Must be dynamic"
             obj.insert_object(worlds, i)
