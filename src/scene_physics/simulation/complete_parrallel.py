@@ -18,20 +18,20 @@ from scene_physics.properties.basic_materials import Dynamic_Material, Still_Mat
 from scene_physics.simulation.parallel_builder import  allocate_worlds
 from scene_physics.likelihood.likelihoods_physics import Likelihood_Physics_Parallel
 from scene_physics.sampling.proposals import SixDOFProposal, linear_decay
-from scene_physics.sampling.parallel_mh import ParallelPhysicsMHSampler
+from scene_physics.sampling.parallel_mh import ImportanceSampling
 from scene_physics.visualization.scene import PyVistaVisualizer, PhysicsVideoVisualizer
 from newton.solvers import SolverXPBD
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
-NUM_WORLDS = 20
-ITERATIONS_PER_OBJECT = 30
+NUM_WORLDS = 10
+ITERATIONS_PER_OBJECT = 15
 POS_STD = 0.05
 ROT_STD = 0.1
 WIDTH = 640
 HEIGHT = 480
 MAX_DEPTH = 5.0
-EXPERIMENT_NAME = "parallel_6dof_2"
+EXPERIMENT_NAME = "parallel_6dof_gibbs"
 LOCATION = f"recordings/{EXPERIMENT_NAME}"
 
 # Physics simulation
@@ -161,9 +161,10 @@ def main():
 
     
     print("Building Sampler")
-    sampler = ParallelPhysicsMHSampler(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=LOCATION)
+    sampler = ImportanceSampling(model, likelihood, obj, iter_per_obj=ITERATIONS_PER_OBJECT, visualization=visualizer, name=LOCATION)
 
-    sampler.run_sampling_linear_print(debug=True)
+    # sampler.run_sampling_linear_print(debug=True)
+    sampler.run_sampling_gibbs(iters=50, debug=True)
     sampler.print_results()
     sampler.plot_proposal_scores()
 

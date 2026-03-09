@@ -14,7 +14,7 @@ from scipy.special import softmax
 from scene_physics.sampling.proposals import SixDOFProposal
 
 
-class ParallelPhysicsMHSampler:
+class ImportanceSampling:
     """"""
 
     def __init__(
@@ -33,6 +33,7 @@ class ParallelPhysicsMHSampler:
         self.sample_state = model.state()
         self.likelihood = likelihood
         self.objects = objects
+        self.object_list = self._get_objects()
 
         # Numpy seed for proposals
         self.np_seed = np.random.SeedSequence(master_seed)
@@ -47,6 +48,9 @@ class ParallelPhysicsMHSampler:
         self.name = name
         self.likelihoods = []
 
+    def _get_objects(self):
+        return self.objects["observed"] + self.objects["unobserved"]
+
     def _gen_proposals(self, proposal):
         """
         Generate a proposor for each object as a dict
@@ -55,10 +59,10 @@ class ParallelPhysicsMHSampler:
             Dict[hast(obj) : Proposor]
         """
         proposals = {}
-        children = self.np_seed.spawn(len(self.objects["observed"] + self.objects["unobserved"]))
+        children = self.np_seed.spawn(len(self.object_list))
         
         # Loop through get attributes and create proposal
-        for i, obj in enumerate(self.objects["observed"] + self.objects["unobserved"]):
+        for i, obj in enumerate(self.object_list):
             attributes = obj.set_proposal(children[i])
             proposals[hash(obj)] = proposal(attributes)
 
@@ -112,8 +116,8 @@ class ParallelPhysicsMHSampler:
             
             # Save proposals and values
             self.likelihoods.append(prev_scores)
-        
-        obj.place_final_position(prev_positions, prev_scores, self.sample_state)
+
+        self._update_all_worlds(scores=prev_scores)
 
     def _update_all_worlds(self, scores):
         """
@@ -131,10 +135,24 @@ class ParallelPhysicsMHSampler:
         bodies = self.sample_state.body_q.numpy()
         new_bodies = bodies.copy()
 
-        for obj in self.objects["observed"] + self.objects["unobserved"]:
+        for obj in self.object_list:
             new_bodies[obj.allocs] = bodies[obj.allocs[resampled_indices]]
 
         self.sample_state.body_q = wp.array(new_bodies, dtype=wp.transformf, device="cuda")
+
+    def _give_final_positions(self):
+        """
+        Gives final positions to all the bodies so we can do simulation
+        """
+
+        # Get top world
+        prev_scores = self.likelihood.new_proposal_likelihood_physics_batch(self.sample_state)
+        top_world = np.argsort(prev_scores)[-1:][::-1][0]
+        
+        # Place it for all worlds
+        for obj in self.object_list:
+            obj.place_final_position(top_world, self.sample_state)
+            
 
     def _save_proposals(self, location, state):
         """
@@ -147,32 +165,61 @@ class ParallelPhysicsMHSampler:
         os.makedirs(location, exist_ok=True)
         self.visualization.gen_multi_world_png(state, location)
 
-    def run_sampling_gibbs(self, iters=100, debug=False, burn_in=10, seed=42):
+    def run_single_sample(self, obj, epoch, debug):
+        """
+        Code to run one forward run of sampling on an objects. We will
+        always use physics for this pass
+        """
+        # Get proposor
+        proposer = self.proposals[hash(obj)]
+        
+        # Generate sample
+        current_positions = obj.get_positions(self.sample_state) # (N, 7)
+        new_positions = proposer.propose_general(current_positions) # (N, 7)
+        obj.move_6dof_wp(new_positions, self.sample_state)
+        
+        # Create visualization
+        if debug and (self.visualization is not None) and (epoch % self.plot_interval) == 0:
+            location = f"{self.name}/epoch_{epoch}"
+            self._save_proposals(location, self.sample_state)
+            
+
+        # Calculate likelihood function
+        scores = self.likelihood.new_proposal_likelihood_physics_batch(self.sample_state)
+        self._update_all_worlds(scores)
+
+
+    def run_sampling_gibbs(self, iters=100, debug=False, burn_in=30, seed=42):
         """
         Run gibbs sampling on scene so that we do each object proposals 
         and then move to next object
         """
 
         # Randomly sample and place these objects
-        objects = self.objects["observed"] + self.objects["unobserved"]
-        rng = np.random.default_rng(seed=self.np_seed.spawn(1))
+        objects = self.object_list
+        rng = np.random.default_rng(self.np_seed.spawn(1)[0])
 
         # Place Objects for Burn In
+        object_num = 0
         print(f"Beginning the Burn in on {len(objects)} objects")
         for obj in objects:
             print(f"Working on obj: {obj}")
-            self.run_single_body_sampling(obj, burn_in, object_num, debug=debug, physics=False)
-
+            self.run_single_body_sampling(obj, burn_in, object_num, physics=False)
             object_num += 1
 
+        # Running the Gibbs Sampling
         print(f"Burn in Complete")
+        print(f"Beginning the Physics Sampling")
         for i in range(iters):
-              choice = rng.integers(low=0, high=len(objects - 1))
-              self.run_single_sample(objects[choice])
+              choice = rng.integers(low=0, high=len(objects))
+              obj = objects[choice]
+              self.run_single_sample(obj, epoch=i, debug=debug)
 
-
-
-
+              if debug and (i % 5 == 0):
+                  print(f"Epoch: {i}, object: {obj} ")
+        
+        # Give final positions to objects
+        self._give_final_positions()
 
     def run_sampling_linear_print(self, debug=False):
         """
@@ -199,6 +246,9 @@ class ParallelPhysicsMHSampler:
             print(f"Working on obj: {obj.name}")
             self.run_single_body_sampling(obj, self.iter_per_obj, object_num, debug=debug, physics=True)
             object_num += 1
+
+        # Give Final Positions
+        self._give_final_positions()
 
 
     def print_results(self):
@@ -261,6 +311,6 @@ class ParallelPhysicsMHSampler:
         fig.tight_layout()
 
         os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
-        fig.savefig(f"{self.name}_scores.png", dpi=150)
+        fig.savefig(f"{self.name}/scores.png", dpi=150)
 
         plt.close(fig)

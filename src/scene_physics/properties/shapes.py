@@ -141,7 +141,7 @@ class Parallel_Mesh:
         bodies[self.allocs[0], 0:3] = np.array(self.target_position)
         self.mw.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
 
-    def place_final_position(self, pos, score, scene):
+    def place_final_position(self, world_index, scene):
         """
         Uses array of positions and score to place our object in it's 
         final position across a variety of worlds
@@ -150,17 +150,9 @@ class Parallel_Mesh:
         assert self.finalized is True, "Can only do on a finalized body"
         assert self.body_locked is False, "Body has already been locked"
 
-        # Get top proposals 
-        top_n_indices = np.argsort(score)[-1:][::-1]
-        positions = np.repeat(pos[top_n_indices], self.num_worlds , axis=0)
-
-        # Place in world
-        self.move_6dof_wp(positions, scene)
-
         # Update body so it can't move
         self.body_locked = True
-        self.final_position = positions[0]
-
+        self.final_position = scene.body_q.numpy()[world_index]
 
     # ------------------------------------------------------------------
     # Position access and manipulation
@@ -177,6 +169,9 @@ class Parallel_Mesh:
     def _get_positions(self):
         """Return body transforms for all worlds from the finalized MultiWorld."""
         return self.mw.body_q.numpy()[self.allocs]
+
+    def get_positions(self, state):
+        return state.body_q.numpy()[self.allocs]
 
     def move_6dof_wp(self, prop_pos, scene):
         """
@@ -279,6 +274,9 @@ class Parallel_Mesh:
         """
         pos = numpy_bd_q[self.allocs[world_id]]
         return self.pyvista_body(pos)
+
+    def __str__(self):
+        return self.name
 
 
 class Parallel_Static_Mesh(Parallel_Mesh):

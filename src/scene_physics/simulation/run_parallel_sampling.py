@@ -18,7 +18,7 @@ from scene_physics.properties.basic_materials import Dynamic_Material, Still_Mat
 from scene_physics.simulation.parallel_builder import build_parallel_worlds
 from scene_physics.likelihood.likelihoods_physics import Likelihood_Physics_Parallel
 from scene_physics.sampling.proposals import SixDOFProposal, linear_decay
-from scene_physics.sampling.parallel_mh import ParallelPhysicsMHSampler
+from scene_physics.sampling.parallel_mh import ImportanceSampling
 
 # ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -128,7 +128,7 @@ def main():
     }
 
     # Create sampler
-    sampler = ParallelPhysicsMHSampler(
+    sampler = ImportanceSampling(
         model=model,
         likelihood=likelihood,
         placement_order=placement_order,

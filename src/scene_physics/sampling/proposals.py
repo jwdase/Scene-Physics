@@ -33,6 +33,7 @@ class SixDOFProposal:
         self.pos_std_base = pos_std
         self.rot_std_base = rot_std
         self.schedule = schedule
+        self.cut_it = 0
 
         # bounding box for distibution
         self.x_bounds = {"lower" : x_lower_bound, "upper" : x_upper_bound}
@@ -73,14 +74,6 @@ class SixDOFProposal:
         ranks = np.argsort(np.argsort(scores))
         return np.array(softmax(ranks.astype(float)))
 
-    def _raw_prob_proposals(self, scores):
-        """
-        Returns:
-            positions: [N, 7] to add noise to
-        """
-        # TODO implement
-        pass
-
 
     def propose_batch(self, pos, scores, cur_it, total_it):
         """
@@ -112,7 +105,25 @@ class SixDOFProposal:
         for i in range(self.num):
             positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
 
+        # Update Iterations
+        self.cut_it += 1
+
         return positions
+
+    def propose_general(self, positions, total_it=None):
+        """Add some noise to positions"""
+
+        pos_std, rot_std = self.get_std(self.cut_it, total_it)
+        positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(self.num, 3))
+
+        for i in range(self.num):
+            positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
+
+        # Update Iterations
+        self.cut_it += 1
+
+        return positions
+
 
     @staticmethod
     def _perturb_rotation(current_quat, rot_std):
