@@ -166,7 +166,7 @@ class Parallel_Mesh:
     # Position access and manipulation
     # ------------------------------------------------------------------
 
-    def set_proposal(self):
+    def set_proposal(self, seed):
         """
         Sets values for the proposer so that it can exist in dict
         """

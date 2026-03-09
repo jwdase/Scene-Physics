@@ -75,6 +75,7 @@ class PyVistaVisualizer:
     def gen_png(self, scene, name, world_id=0):
         plotter = self._fill_scene(scene, world_id)
         plotter.screenshot(name)
+        plotter.close()
 
     def show_final_scene(self, name):
         plotter = self._fill_scene(None, None, func=Parallel_Mesh.to_pyvista_final)

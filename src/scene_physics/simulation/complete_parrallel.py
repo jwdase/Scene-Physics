@@ -25,13 +25,13 @@ from newton.solvers import SolverXPBD
 # ─── Configuration ───────────────────────────────────────────────────────────
 
 NUM_WORLDS = 20
-ITERATIONS_PER_OBJECT = 20
+ITERATIONS_PER_OBJECT = 30
 POS_STD = 0.05
 ROT_STD = 0.1
 WIDTH = 640
 HEIGHT = 480
 MAX_DEPTH = 5.0
-EXPERIMENT_NAME = "parallel_6dof"
+EXPERIMENT_NAME = "parallel_6dof_2"
 LOCATION = f"recordings/{EXPERIMENT_NAME}"
 
 # Physics simulation

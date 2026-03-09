@@ -9,6 +9,7 @@ import os
 import matplotlib.pyplot as plt
 import numpy as np
 import warp as wp
+from scipy.special import softmax
 
 from scene_physics.sampling.proposals import SixDOFProposal
 
@@ -27,10 +28,14 @@ class ParallelPhysicsMHSampler:
         visualization=None,
         interval=None,
         name=None,
+        master_seed=42,
     ):
         self.sample_state = model.state()
         self.likelihood = likelihood
         self.objects = objects
+
+        # Numpy seed for proposals
+        self.np_seed = np.random.SeedSequence(master_seed)
 
         # Information for proposals
         self.proposals = self._gen_proposals(SixDOFProposal if proposal is None else proposal)
@@ -50,10 +55,11 @@ class ParallelPhysicsMHSampler:
             Dict[hast(obj) : Proposor]
         """
         proposals = {}
+        children = self.np_seed.spawn(len(self.objects["observed"] + self.objects["unobserved"]))
         
         # Loop through get attributes and create proposal
-        for obj in self.objects["observed"] + self.objects["unobserved"]:
-            attributes = obj.set_proposal()
+        for i, obj in enumerate(self.objects["observed"] + self.objects["unobserved"]):
+            attributes = obj.set_proposal(children[i])
             proposals[hash(obj)] = proposal(attributes)
 
         return proposals
@@ -69,7 +75,6 @@ class ParallelPhysicsMHSampler:
         Returns:
             Object correctly placed
         """
-
 
         # Generate the proposal method, and get initial positions
         proposor = self.proposals[hash(obj)]
@@ -107,10 +112,29 @@ class ParallelPhysicsMHSampler:
             
             # Save proposals and values
             self.likelihoods.append(prev_scores)
-
-                
-        # Save best position (TODO Build it for n bodies)
+        
         obj.place_final_position(prev_positions, prev_scores, self.sample_state)
+
+    def _update_all_worlds(self, scores):
+        """
+        Takes scores computes softmax for relative likelihood. It then
+        copies the worlds with respect to their softmax probability across the
+        n allocated worlds in self.sample_scene
+        """
+        probs = softmax(scores)
+        num_worlds = len(scores)
+
+        # Multinomial resample: high-score worlds duplicated, low-score worlds dropped
+        rng = np.random.default_rng(self.np_seed.spawn(1)[0])
+        resampled_indices = rng.choice(num_worlds, size=num_worlds, replace=True, p=probs)
+
+        bodies = self.sample_state.body_q.numpy()
+        new_bodies = bodies.copy()
+
+        for obj in self.objects["observed"] + self.objects["unobserved"]:
+            new_bodies[obj.allocs] = bodies[obj.allocs[resampled_indices]]
+
+        self.sample_state.body_q = wp.array(new_bodies, dtype=wp.transformf, device="cuda")
 
     def _save_proposals(self, location, state):
         """
@@ -123,13 +147,30 @@ class ParallelPhysicsMHSampler:
         os.makedirs(location, exist_ok=True)
         self.visualization.gen_multi_world_png(state, location)
 
-    def run_sampling_gibbs(self, debug=False):
+    def run_sampling_gibbs(self, iters=100, debug=False, burn_in=10, seed=42):
         """
         Run gibbs sampling on scene so that we do each object proposals 
         and then move to next object
         """
-        # TODO implement
-        pass
+
+        # Randomly sample and place these objects
+        objects = self.objects["observed"] + self.objects["unobserved"]
+        rng = np.random.default_rng(seed=self.np_seed.spawn(1))
+
+        # Place Objects for Burn In
+        print(f"Beginning the Burn in on {len(objects)} objects")
+        for obj in objects:
+            print(f"Working on obj: {obj}")
+            self.run_single_body_sampling(obj, burn_in, object_num, debug=debug, physics=False)
+
+            object_num += 1
+
+        print(f"Burn in Complete")
+        for i in range(iters):
+              choice = rng.integers(low=0, high=len(objects - 1))
+              self.run_single_sample(objects[choice])
+
+
 
 
 
@@ -156,7 +197,7 @@ class ParallelPhysicsMHSampler:
         print("Physics Sampling")
         for obj in self.objects["unobserved"]:
             print(f"Working on obj: {obj.name}")
-            self.run_single_body_sampling(obj, self.iter_per_obj, object_num, physics=True)
+            self.run_single_body_sampling(obj, self.iter_per_obj, object_num, debug=debug, physics=True)
             object_num += 1
 
 

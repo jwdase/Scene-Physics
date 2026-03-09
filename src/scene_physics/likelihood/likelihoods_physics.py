@@ -317,11 +317,17 @@ class Likelihood_Physics_Parallel:
     def new_proposal_likelihood_physics_batch(self, scene):
         """Run forward physics on all worlds, then batch render + compute likelihoods.
 
+        Worlds whose initial proposal placement causes a rigid-body collision are
+        assigned -inf and skipped in score averaging. Physics still runs over all
+        worlds (the solver is a single batched kernel), but colliding worlds are
+        excluded from results.
+
         Args:
             scene: Newton state with all worlds' body_q already set to proposals
 
         Returns:
-            numpy array of shape (num_worlds,) with likelihood scores (relative to baseline)
+            numpy array of shape (num_worlds,) with likelihood scores (relative to baseline),
+            -inf for any world with an initial collision.
         """
         state_0, state_1 = self._state_0, self._state_1
         state_0.assign(scene)
@@ -353,7 +359,9 @@ class Likelihood_Physics_Parallel:
 
         # Average across eval points and subtract baseline
         avg_scores = total_scores / eval_idx
-        return avg_scores - self.baseline_score
+        avg_scores -= self.baseline_score
+
+        return avg_scores
 
     def new_proposal_likelihood_still_batch(self, scene):
         """Batch render all worlds at their current positions, compute likelihoods.
@@ -366,9 +374,18 @@ class Likelihood_Physics_Parallel:
         Returns:
             numpy array of shape (num_worlds,) with likelihood scores (relative to baseline)
         """
+
+        state_0 = self._state_0
+        state_0.assign(scene)
+
         batch_clouds = self._render_batch(scene)
         scores = compute_likelihood_score_batch(
             observed_xyz=self.correct_pointcloud,
             rendered_xyz_batch=batch_clouds,
         )
-        return np.asarray(scores) - self.baseline_score
+        
+        # Rescale for Collision
+        scores = np.asarray(scores) - self.baseline_score
+
+
+        return scores
