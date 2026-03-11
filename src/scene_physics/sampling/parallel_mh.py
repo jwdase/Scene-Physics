@@ -22,6 +22,7 @@ class ImportanceSampling:
         model,
         likelihood,
         objects,
+        decay=None,
         proposal=None,
         iter_per_obj=None,
         convergence_threshold=0.8,
@@ -37,6 +38,9 @@ class ImportanceSampling:
 
         # Numpy seed for proposals
         self.np_seed = np.random.SeedSequence(master_seed)
+        
+        # Specify Decay before
+        self.decay = "no_decay" if decay is None else decay
 
         # Information for proposals
         self.proposals = self._gen_proposals(SixDOFProposal if proposal is None else proposal)
@@ -63,10 +67,31 @@ class ImportanceSampling:
         
         # Loop through get attributes and create proposal
         for i, obj in enumerate(self.object_list):
-            attributes = obj.set_proposal(children[i])
-            proposals[hash(obj)] = proposal(attributes)
+            priors, num_worlds = obj.set_proposal()
+            proposals[hash(obj)] = proposal(priors, num_worlds, children[i], schedule=self.decay)
 
         return proposals
+
+    def _generate_positions(self, position, scores):
+        """
+        takes in positions and scores. Returns an [N, 7] matrix
+        ranking the top scores
+        """
+        
+        # Get Worlds w/ Probability
+        num_worlds = len(scores)
+        probs = softmax(scores)
+
+        # Select top world to continue on
+        top_world = position[np.argmax(probs)][np.newaxis]  # (1, 7)
+
+        # Randomly select others from probs
+        rng = np.random.default_rng(self.np_seed.spawn(1)[0])
+        resampled_indices = rng.choice(num_worlds, size=num_worlds-1, replace=True, p=probs)
+        new_positions = position[resampled_indices]
+
+        # Stack over positions
+        return np.concatenate([top_world, new_positions], axis=0)
 
 
     def run_single_body_sampling(self, obj, total_iter, object_num, physics=False, init_positions=None, debug=False):
@@ -96,7 +121,12 @@ class ImportanceSampling:
 
         # Run Importance Sampling
         for iteration in range(total_iter):
-            new_positions = proposor.propose_batch(prev_positions, prev_scores, iteration, total_iter)
+
+            # Get a ranking of positions and then sample
+            new_positions = self._generate_positions(prev_positions, prev_scores)
+            new_positions = proposor.propose_general(new_positions, iteration)
+
+            # Move the object
             obj.move_6dof_wp(new_positions, self.sample_state)
             
             # Save values for new iteration
@@ -128,9 +158,13 @@ class ImportanceSampling:
         probs = softmax(scores)
         num_worlds = len(scores)
 
+        # Get top score and put at world 0
+        top_index = np.argmax(scores)
+
         # Multinomial resample: high-score worlds duplicated, low-score worlds dropped
         rng = np.random.default_rng(self.np_seed.spawn(1)[0])
-        resampled_indices = rng.choice(num_worlds, size=num_worlds, replace=True, p=probs)
+        resampled_indices = rng.choice(num_worlds, size=num_worlds - 1, replace=True, p=probs)
+        resampled_indices = np.concatenate([[top_index], resampled_indices])
 
         bodies = self.sample_state.body_q.numpy()
         new_bodies = bodies.copy()
@@ -175,7 +209,7 @@ class ImportanceSampling:
         
         # Generate sample
         current_positions = obj.get_positions(self.sample_state) # (N, 7)
-        new_positions = proposer.propose_general(current_positions) # (N, 7)
+        new_positions = proposer.propose_general(current_positions, epoch) # (N, 7)
         obj.move_6dof_wp(new_positions, self.sample_state)
         
         # Create visualization
@@ -313,4 +347,40 @@ class ImportanceSampling:
         os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
         fig.savefig(f"{self.name}/scores.png", dpi=150)
 
+        plt.close(fig)
+
+    def plot_proposal_stds(self):
+        """
+        Plot pos_std and rot_std for each object's proposer over sampling iterations.
+
+        Each object contributes two lines (one per subplot): the schedule-scaled
+        position and rotation standard deviations recorded in SixDOFProposal at
+        every call to propose_general.
+
+        Saves to <self.name>/proposal_stds.png.
+        """
+        fig, (ax_pos, ax_rot) = plt.subplots(2, 1, figsize=(12, 6), sharex=False)
+
+        for obj in self.object_list:
+            proposer = self.proposals[hash(obj)]
+            epochs = proposer.epoch_num
+            if len(epochs) == 0:
+                continue
+            ax_pos.plot(epochs, proposer.save_pos_std, label=obj.name)
+            ax_rot.plot(epochs, proposer.save_rot_std, label=obj.name)
+
+        ax_pos.set_ylabel("pos_std")
+        ax_pos.set_title("Position proposal std across iterations")
+        ax_pos.legend(loc="upper right")
+        ax_pos.grid(True, alpha=0.3)
+
+        ax_rot.set_ylabel("rot_std (rad)")
+        ax_rot.set_xlabel("Iteration")
+        ax_rot.set_title("Rotation proposal std across iterations")
+        ax_rot.legend(loc="upper right")
+        ax_rot.grid(True, alpha=0.3)
+
+        fig.tight_layout()
+        os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
+        fig.savefig(f"{self.name}/proposal_stds.png", dpi=150)
         plt.close(fig)

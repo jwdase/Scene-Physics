@@ -1,3 +1,6 @@
+
+from dataclasses import dataclass, field
+
 import warp as wp
 import newton
 import pyvista as pv
@@ -5,6 +8,26 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from scene_physics.properties.material import Material
+
+@dataclass
+class Priors:
+    """
+    Lists out the priors for each sampler this is a dataclass, all in meters
+    """
+    # Priors
+    init_mean: float = 0.0
+    init_std: float = 0.01
+
+    # Sampling Params
+    pos_std: float = 0.1
+    rot_std: float = 0.1
+    total_iter: int = 40
+
+    # bounds
+    x_max: float= 1.0
+    x_min: float= -1.0
+    z_max: float=1.0
+    z_min: float=-1.0
 
 
 class Parallel_Mesh:
@@ -18,7 +41,7 @@ class Parallel_Mesh:
 
     OFF_POSITION = np.array((0., -1_000., 0.))
 
-    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None, target_position=None):
+    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None, target_position=None, priors=None):
         # Physical properties
         self.mass = 0.0 if mass is None else mass
         self.position = wp.vec3(0., 0., 0.) if position is None else wp.vec3(*position)
@@ -45,6 +68,8 @@ class Parallel_Mesh:
         # Variables to track body state
         self.OFF = False 
         self.body_locked = False
+
+        self.priors = Priors() if priors is None else priors
 
     # ------------------------------------------------------------------
     # World management
@@ -158,13 +183,12 @@ class Parallel_Mesh:
     # Position access and manipulation
     # ------------------------------------------------------------------
 
-    def set_proposal(self, seed):
+    def set_proposal(self):
         """
         Sets values for the proposer so that it can exist in dict
         """
         
-        # TODO implement however you see fit
-        return self
+        return self.priors, self.num_worlds
 
     def _get_positions(self):
         """Return body transforms for all worlds from the finalized MultiWorld."""

@@ -250,7 +250,7 @@ class Likelihood_Physics_Parallel:
         self.dt = 0.05 if dt is None else dt
         self.solver = self._get_solver() if solver is None else solver
         self.frames = 50 if frames is None else frames
-        self.eval_every = 5 if eval_every is None else eval_every
+        self.eval_every = 20 if eval_every is None else eval_every
 
         # Rendering
         self.height = 480 if height is None else height

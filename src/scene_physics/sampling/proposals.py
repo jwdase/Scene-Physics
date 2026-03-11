@@ -6,6 +6,8 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from scipy.special import softmax
 
+from scene_physics.properties.shapes import Priors
+
 
 def linear_decay(iteration, total_iterations):
     """Linear decay from 1.0 to 0.1 over total_iterations."""
@@ -16,38 +18,44 @@ def exponential_decay(iteration, half_life=50):
     """Exponential decay with configurable half-life."""
     return max(0.1, np.exp(-0.693 * iteration / half_life))
 
+def no_decay(iteration, half_life):
+    return 1.0
+
 
 class SixDOFProposal:
     """"""
+    schedules = {"linear" : linear_decay, "exp" : exponential_decay, "no_decay" : no_decay}
 
-    def __init__(self, obj, x_lower_bound=-1.0, x_upper_bound=1.0, z_lower_bound=-1.0, z_upper_bound=1.0, pos_std=0.01, rot_std=0.01, schedule=None, prob_f=None):
-        # Object informaion
-        self.obj = obj
-        self.num = self.obj.num_worlds
+    def __init__(self, priors, num_worlds, seed, schedule="no_decay"):
+        assert isinstance(priors, Priors), "Expecting object priors passed in"
+        
+        # Values for sampling
+        self.num = num_worlds
+        self.priors = priors
 
-        # Values for initilization
-        self._init_mean = 0.00 # TODO better way to set
-        self._init_std = 0.05 # TODO better way to set
+        # TODO Random Seed
+        
+        # Our schedulers
+        self.schedulers = self._get_scheduler(schedule)
+        self.cur_iters = 0
 
-        # for next proposals
-        self.pos_std_base = pos_std
-        self.rot_std_base = rot_std
-        self.schedule = schedule
-        self.cut_it = 0
+        # Saves values for rot_std and pos_std
+        self.save_rot_std = []
+        self.save_pos_std = []
+        self.epoch_num = []
 
-        # bounding box for distibution
-        self.x_bounds = {"lower" : x_lower_bound, "upper" : x_upper_bound}
-        self.z_bounds = {"lower" : z_lower_bound, "upper" : z_upper_bound}
+    def _get_scheduler(self, schedule_type):
+        """Choooses our schedulers for 6DoF"""
 
-        # Selection function
-        self.prob_f = self._rank_proposals if prob_f is None else prob_f
+        assert schedule_type in list(self.schedules.keys()), "Scheduler {schedule_type} is not an option"
+        return self.schedules[schedule_type]
 
-    def get_std(self, iteration, total_iterations=None):
+
+    def get_std(self):
         """Get current (pos_std, rot_std) after applying schedule."""
-        if self.schedule is None:
-            return self.pos_std_base, self.rot_std_base
-        scale = self.schedule(iteration, total_iterations)
-        return self.pos_std_base * scale, self.rot_std_base * scale
+
+        scale = self.schedulers(self.cur_iters, self.priors.total_iter)
+        return self.priors.pos_std * scale, self.priors.rot_std * scale
 
     def initial_positions(self):
         """
@@ -58,7 +66,7 @@ class SixDOFProposal:
         """
 
         positions = np.zeros((self.num, 7))
-        positions[:, :3] = np.random.normal(loc=self._init_mean, scale=self._init_std, size=(self.num, 3))
+        positions[:, :3] = np.random.normal(loc=self.priors.init_mean, scale=self.priors.init_std, size=(self.num, 3))
 
         # Ensure Y axis > 0, place vertical
         positions[:, 1] = np.abs(positions[:, 1])
@@ -66,61 +74,33 @@ class SixDOFProposal:
 
         return positions
 
-    def _rank_proposals(self, scores):
+    def _update_epochs(self, pos_std, rot_std, epoch_num):
+        """Saves values for epoch in plotting"""
+
+        self.save_pos_std.append(pos_std)
+        self.save_rot_std.append(rot_std)
+        self.epoch_num.append(epoch_num)
+
+
+    def propose_general(self, positions, epoch_num): 
         """
-        Returns:
-            positions: (self.num_world,) to add noise to
-        """
-        ranks = np.argsort(np.argsort(scores))
-        return np.array(softmax(ranks.astype(float)))
-
-
-    def propose_batch(self, pos, scores, cur_it, total_it):
-        """
-        Generate 6DOF proposals for the current object
-
-        Args:
-            current_pos: [5, 7] array - top 5 current (x, y, z, qx, qy, qz, qw)
-            scores: (n, ) numpy array of relative scores
-            iterations: current MCMC iterations (for scheduling)
-
-        Returns:
-            positions: [N, 7] numpy array of options
+        Add some noise to positions - does not add noise to index=0 where top
+        index from previous run is stored.
         """
 
-        # Calculate probabilites and select randomly
-        idx = np.random.choice(len(pos), size=self.num, p=self.prob_f(scores))
-        positions = pos[idx]
-        
-        # Apply Gaussian Noise to placement
-        pos_std, rot_std = self.get_std(cur_it, total_it)
-        positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(self.num, 3))
+        pos_std, rot_std = self.get_std()
+        positions[1:, :3] = positions[1:, :3] + np.random.normal(0, pos_std, size=(self.num - 1, 3))
+        positions[:, 0] = np.clip(positions[:, 0], a_min=self.priors.x_min, a_max=self.priors.x_max)
+        positions[:, 2] = np.clip(positions[:, 2], a_min=self.priors.z_min, a_max=self.priors.z_max)
 
-        # Clip to bounds on proposals
-        positions[:, 0] = np.clip(positions[:, 0], self.x_bounds["lower"], self.x_bounds["upper"])
-        positions[:, 1] = np.clip(positions[:, 1], 0.0, None)
-        positions[:, 2] = np.clip(positions[:, 2], self.z_bounds["lower"], self.z_bounds["upper"])
-        
-        # TODO make this in parrallel somehow
-        for i in range(self.num):
+        for i in range(1, self.num):
             positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
 
-        # Update Iterations
-        self.cut_it += 1
-
-        return positions
-
-    def propose_general(self, positions, total_it=None):
-        """Add some noise to positions"""
-
-        pos_std, rot_std = self.get_std(self.cut_it, total_it)
-        positions[:, :3] = positions[:, :3] + np.random.normal(0, pos_std, size=(self.num, 3))
-
-        for i in range(self.num):
-            positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
+        # Save values in object
+        self._update_epochs(pos_std, rot_std, epoch_num)
 
         # Update Iterations
-        self.cut_it += 1
+        self.cur_iters += 1
 
         return positions
 
