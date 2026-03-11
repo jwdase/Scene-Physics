@@ -6,7 +6,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 from scipy.special import softmax
 
-from scene_physics.properties.shapes import Priors
+from scene_physics.properties.priors import Priors
 
 
 def linear_decay(iteration, total_iterations):
@@ -82,7 +82,7 @@ class SixDOFProposal:
         self.epoch_num.append(epoch_num)
 
 
-    def propose_general(self, positions, epoch_num): 
+    def propose_general(self, positions, epoch_num, count): 
         """
         Add some noise to positions - does not add noise to index=0 where top
         index from previous run is stored.
@@ -97,7 +97,8 @@ class SixDOFProposal:
             positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
 
         # Save values in object
-        self._update_epochs(pos_std, rot_std, epoch_num)
+        if count is True:
+            self._update_epochs(pos_std, rot_std, epoch_num)
 
         # Update Iterations
         self.cur_iters += 1

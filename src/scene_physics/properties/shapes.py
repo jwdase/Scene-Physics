@@ -1,6 +1,3 @@
-
-from dataclasses import dataclass, field
-
 import warp as wp
 import newton
 import pyvista as pv
@@ -8,27 +5,7 @@ import numpy as np
 from scipy.spatial.transform import Rotation
 
 from scene_physics.properties.material import Material
-
-@dataclass
-class Priors:
-    """
-    Lists out the priors for each sampler this is a dataclass, all in meters
-    """
-    # Priors
-    init_mean: float = 0.0
-    init_std: float = 0.01
-
-    # Sampling Params
-    pos_std: float = 0.1
-    rot_std: float = 0.1
-    total_iter: int = 40
-
-    # bounds
-    x_max: float= 1.0
-    x_min: float= -1.0
-    z_max: float=1.0
-    z_min: float=-1.0
-
+from scene_physics.properties.priors import Priors
 
 class Parallel_Mesh:
     """

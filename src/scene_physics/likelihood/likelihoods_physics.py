@@ -275,9 +275,13 @@ class Likelihood_Physics_Parallel:
         self._state_0 = self.model.state()
         self._state_1 = self.model.state()
 
-        # Pre-allocate eval states for snapshots
+        # Allocate a CPU body_q snapshot array (num_eval_points, *body_q_shape)
         self._num_eval_points = self.frames // self.eval_every
-        self._eval_states = [self.model.state() for _ in range(self._num_eval_points)]
+        body_q_shape = self._state_0.body_q.numpy().shape
+        self._eval_states = np.empty((self._num_eval_points,) + body_q_shape)
+
+        # Pre-allocate a single reusable GPU render buffer for Phase 2
+        self._render_state = self.model.state()
 
         # Save target
         os.makedirs(f"recordings/{self.name}", exist_ok=True)
@@ -341,7 +345,7 @@ class Likelihood_Physics_Parallel:
             self.solver.step(state_0, state_1, self.control, contacts, self.dt)
 
             if (frame + 1) % self.eval_every == 0:
-                self._eval_states[eval_idx].assign(state_1)
+                self._eval_states[eval_idx] = state_1.body_q.numpy()
                 eval_idx += 1
 
             state_0, state_1 = state_1, state_0
@@ -350,7 +354,10 @@ class Likelihood_Physics_Parallel:
         # Accumulate likelihoods across eval points
         total_scores = np.zeros(self.num_worlds)
         for i in range(eval_idx):
-            batch_clouds = self._render_batch(self._eval_states[i])
+
+            # Load snapshot into reusable render state
+            self._render_state.body_q = wp.array(self._eval_states[i], dtype=wp.transformf, device="cuda")
+            batch_clouds = self._render_batch(self._render_state)
             scores = compute_likelihood_score_batch(
                 observed_xyz=self.correct_pointcloud,
                 rendered_xyz_batch=batch_clouds,
@@ -374,9 +381,6 @@ class Likelihood_Physics_Parallel:
         Returns:
             numpy array of shape (num_worlds,) with likelihood scores (relative to baseline)
         """
-
-        state_0 = self._state_0
-        state_0.assign(scene)
 
         batch_clouds = self._render_batch(scene)
         scores = compute_likelihood_score_batch(

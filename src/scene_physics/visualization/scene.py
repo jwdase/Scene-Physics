@@ -151,6 +151,8 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
             history.append(state_1.body_q.numpy().copy())
             state_0, state_1 = state_1, state_0
 
+        print(np.array(history)[-1])
+
         return history
 
     def render(self, history, body_idx, output_filename, fps):

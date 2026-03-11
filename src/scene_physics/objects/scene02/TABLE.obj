@@ -1,5 +1,6 @@
-# Blender 5.0.0
+# Blender 4.5.1 LTS
 # www.blender.org
+mtllib TABLE.mtl
 o dining_room_table
 v 0.456661 0.582743 0.409575
 v 0.463593 0.582743 0.355557

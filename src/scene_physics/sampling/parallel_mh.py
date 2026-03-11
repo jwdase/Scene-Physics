@@ -94,7 +94,7 @@ class ImportanceSampling:
         return np.concatenate([top_world, new_positions], axis=0)
 
 
-    def run_single_body_sampling(self, obj, total_iter, object_num, physics=False, init_positions=None, debug=False):
+    def run_single_body_sampling(self, obj, total_iter, object_num, physics=False, init_positions=None, debug=False, count=True):
         """
         Run sequential placement with parallel across 1 objectn
 
@@ -124,7 +124,7 @@ class ImportanceSampling:
 
             # Get a ranking of positions and then sample
             new_positions = self._generate_positions(prev_positions, prev_scores)
-            new_positions = proposor.propose_general(new_positions, iteration)
+            new_positions = proposor.propose_general(new_positions, iteration, count)
 
             # Move the object
             obj.move_6dof_wp(new_positions, self.sample_state)
@@ -199,7 +199,7 @@ class ImportanceSampling:
         os.makedirs(location, exist_ok=True)
         self.visualization.gen_multi_world_png(state, location)
 
-    def run_single_sample(self, obj, epoch, debug):
+    def run_single_sample(self, obj, epoch, debug, count=True):
         """
         Code to run one forward run of sampling on an objects. We will
         always use physics for this pass
@@ -209,7 +209,7 @@ class ImportanceSampling:
         
         # Generate sample
         current_positions = obj.get_positions(self.sample_state) # (N, 7)
-        new_positions = proposer.propose_general(current_positions, epoch) # (N, 7)
+        new_positions = proposer.propose_general(current_positions, epoch, count) # (N, 7)
         obj.move_6dof_wp(new_positions, self.sample_state)
         
         # Create visualization
@@ -220,6 +220,7 @@ class ImportanceSampling:
 
         # Calculate likelihood function
         scores = self.likelihood.new_proposal_likelihood_physics_batch(self.sample_state)
+        self.likelihoods.append(scores)
         self._update_all_worlds(scores)
 
 
@@ -238,7 +239,7 @@ class ImportanceSampling:
         print(f"Beginning the Burn in on {len(objects)} objects")
         for obj in objects:
             print(f"Working on obj: {obj}")
-            self.run_single_body_sampling(obj, burn_in, object_num, physics=False)
+            self.run_single_body_sampling(obj, burn_in, object_num, physics=False, count=False)
             object_num += 1
 
         # Running the Gibbs Sampling
@@ -247,9 +248,9 @@ class ImportanceSampling:
         for i in range(iters):
               choice = rng.integers(low=0, high=len(objects))
               obj = objects[choice]
-              self.run_single_sample(obj, epoch=i, debug=debug)
+              self.run_single_sample(obj, epoch=i, debug=debug, count=True)
 
-              if debug and (i % 5 == 0):
+              if i % 10 == 0:
                   print(f"Epoch: {i}, object: {obj} ")
         
         # Give final positions to objects
@@ -347,6 +348,38 @@ class ImportanceSampling:
         os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
         fig.savefig(f"{self.name}/scores.png", dpi=150)
 
+        plt.close(fig)
+
+    def plot_avg_score(self):
+        """
+        Plot mean likelihood score across all worlds at each iteration.
+
+        self.likelihoods is a list of (num_worlds,) arrays covering both the
+        burn-in phase (run_single_body_sampling) and the Gibbs phase
+        (run_single_sample). The mean and max across worlds are plotted so
+        convergence is easy to read.
+
+        Saves to <self.name>/avg_score.png.
+        """
+        assert len(self.likelihoods) > 0, "No likelihoods recorded — run sampling first"
+
+        scores = np.stack(self.likelihoods, axis=0)   # (num_iterations, num_worlds)
+        iterations = np.arange(len(self.likelihoods))
+        mean_scores = scores.mean(axis=1)
+        max_scores = scores.max(axis=1)
+
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(iterations, mean_scores, label="mean", linewidth=2)
+        ax.plot(iterations, max_scores, label="max", linewidth=1.5, linestyle="--")
+        ax.set_xlabel("Iteration")
+        ax.set_ylabel("Likelihood score")
+        ax.set_title("Average likelihood score across worlds over time")
+        ax.legend(loc="lower right")
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
+        fig.savefig(f"{self.name}/avg_score.png", dpi=150)
         plt.close(fig)
 
     def plot_proposal_stds(self):
