@@ -18,23 +18,25 @@ def exponential_decay(iteration, half_life=50):
     """Exponential decay with configurable half-life."""
     return max(0.1, np.exp(-0.693 * iteration / half_life))
 
+
 def no_decay(iteration, half_life):
     return 1.0
 
 
 class SixDOFProposal:
     """"""
-    schedules = {"linear" : linear_decay, "exp" : exponential_decay, "no_decay" : no_decay}
+
+    schedules = {"linear": linear_decay, "exp": exponential_decay, "no_decay": no_decay}
 
     def __init__(self, priors, num_worlds, seed, schedule="no_decay"):
         assert isinstance(priors, Priors), "Expecting object priors passed in"
-        
+
         # Values for sampling
         self.num = num_worlds
         self.priors = priors
 
         # TODO Random Seed
-        
+
         # Our schedulers
         self.schedulers = self._get_scheduler(schedule)
         self.cur_iters = 0
@@ -47,9 +49,10 @@ class SixDOFProposal:
     def _get_scheduler(self, schedule_type):
         """Choooses our schedulers for 6DoF"""
 
-        assert schedule_type in list(self.schedules.keys()), "Scheduler {schedule_type} is not an option"
+        assert schedule_type in list(
+            self.schedules.keys()
+        ), "Scheduler {schedule_type} is not an option"
         return self.schedules[schedule_type]
-
 
     def get_std(self):
         """Get current (pos_std, rot_std) after applying schedule."""
@@ -66,7 +69,9 @@ class SixDOFProposal:
         """
 
         positions = np.zeros((self.num, 7))
-        positions[:, :3] = np.random.normal(loc=self.priors.init_mean, scale=self.priors.init_std, size=(self.num, 3))
+        positions[:, :3] = np.random.normal(
+            loc=self.priors.init_mean, scale=self.priors.init_std, size=(self.num, 3)
+        )
 
         # Ensure Y axis > 0, place vertical
         positions[:, 1] = np.abs(positions[:, 1])
@@ -81,20 +86,27 @@ class SixDOFProposal:
         self.save_rot_std.append(rot_std)
         self.epoch_num.append(epoch_num)
 
-
-    def propose_general(self, positions, epoch_num, count): 
+    def propose_general(self, positions, epoch_num, count):
         """
         Add some noise to positions - does not add noise to index=0 where top
         index from previous run is stored.
         """
 
         pos_std, rot_std = self.get_std()
-        positions[1:, :3] = positions[1:, :3] + np.random.normal(0, pos_std, size=(self.num - 1, 3))
-        positions[:, 0] = np.clip(positions[:, 0], a_min=self.priors.x_min, a_max=self.priors.x_max)
-        positions[:, 2] = np.clip(positions[:, 2], a_min=self.priors.z_min, a_max=self.priors.z_max)
+        positions[1:, :3] = positions[1:, :3] + np.random.normal(
+            0, pos_std, size=(self.num - 1, 3)
+        )
+        positions[:, 0] = np.clip(
+            positions[:, 0], a_min=self.priors.x_min, a_max=self.priors.x_max
+        )
+        positions[:, 2] = np.clip(
+            positions[:, 2], a_min=self.priors.z_min, a_max=self.priors.z_max
+        )
 
         for i in range(1, self.num):
-            positions[i, 3:] = self._perturb_rotation(positions[i, 3:].squeeze(), rot_std)
+            positions[i, 3:] = self._perturb_rotation(
+                positions[i, 3:].squeeze(), rot_std
+            )
 
         # Save values in object
         if count is True:
@@ -104,7 +116,6 @@ class SixDOFProposal:
         self.cur_iters += 1
 
         return positions
-
 
     @staticmethod
     def _perturb_rotation(current_quat, rot_std):

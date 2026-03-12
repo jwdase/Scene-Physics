@@ -16,7 +16,7 @@ from scene_physics.properties.priors import Priors
 from scene_physics.utils.setup import build_worlds
 from scene_physics.properties.shapes import Parallel_Mesh, Parallel_Static_Mesh
 from scene_physics.properties.basic_materials import Dynamic_Material, Still_Material
-from scene_physics.simulation.parallel_builder import  allocate_worlds
+from scene_physics.utils.parallel_builder import allocate_worlds
 from scene_physics.likelihood.likelihoods_physics import Likelihood_Physics_Parallel
 from scene_physics.sampling.parallel_mh import ImportanceSampling
 from scene_physics.visualization.scene import PyVistaVisualizer, PhysicsVideoVisualizer
