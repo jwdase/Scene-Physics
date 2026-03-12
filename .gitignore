@@ -223,3 +223,11 @@ __marimo__/
 *.stl
 *.png
 *.zip
+
+# Experiment recordings
+src/scene_physics/recordings/
+
+# Warp GPU cache
+warp_cache/
+*.ptx
+*.cubin

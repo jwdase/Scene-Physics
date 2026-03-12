@@ -26,24 +26,24 @@ uv run pytest
 
 ## Canonical Script Structure
 
-`simulation/complete_parrallel.py` is the canonical example of how experiments are organized. Every script follows this 3-phase pattern:
+`simulation/complete_parrallel.py` is the canonical example. Every script follows this 3-phase pattern:
 
 **Phase 1 — Build the world**
 ```python
-worlds = allocate_worlds(NUM_WORLDS)          # N isolated physics worlds + shared ground
-obj = make_scene01_world()                     # returns {"observed": [...], "static": [...], "unobserved": [...]}
-model, target_state, _ = build_worlds(worlds, obj["static"], obj["observed"], obj["unobserved"])
+worlds = allocate_worlds(NUM_WORLDS)       # N isolated physics worlds + shared ground
+obj = make_scene01_world()                 # returns {"observed": [...], "static": [...], "unobserved": [...]}
+model, target_state = build_worlds(worlds, obj)
 ```
 
 **Phase 2 — Build the likelihood**
 ```python
-likelihood = Likelihood_Physics_Parallel(target_state=target_state, model=model, ...)
+likelihood = Likelihood_Physics_Parallel(target_state=target_state, model=model, num_worlds=NUM_WORLDS, ...)
 ```
 
 **Phase 3 — Build and run the sampler**
 ```python
-sampler = ParallelPhysicsMHSampler(model, likelihood, obj)
-sampler.run_sampling()
+sampler = ImportanceSampling(model, likelihood, obj, ...)
+sampler.run_sampling_linear_print()   # or run_sampling_gibbs()
 sampler.print_results()
 ```
 
@@ -57,8 +57,6 @@ Every scene function returns a dict with three keys:
 | `"unobserved"` | `list[Parallel_Mesh]` | Dynamic objects sampled using physics (not directly visible) |
 | `"static"` | `list[Parallel_Static_Mesh]` | Kinematic objects shared across all worlds (table, floor accessories) |
 
-`ParallelPhysicsMHSampler.run_sampling()` uses this distinction: observed objects use `new_proposal_likelihood_still_batch` (no physics, fast), unobserved use `new_proposal_likelihood_physics_batch` (forward sim, slower).
-
 ## World Building Pipeline (`build_worlds`)
 
 Order matters for `allocs` tracking:
@@ -68,6 +66,29 @@ Order matters for `allocs` tracking:
 4. Call `move_to_target()` on all objects (sets world-0 to ground-truth position)
 5. Capture `target = model.state()` — this is the ground-truth observation
 6. Call `freeze_finalized_body()` on dynamic objects (zeros inv_mass/inv_inertia, moves to `OFF_POSITION=(0,-1000,0)`)
+
+`build_worlds` returns `(model, target_state)` — two values only.
+
+## Priors (`properties/priors.py`)
+
+Each `Parallel_Mesh` carries a `Priors` dataclass (defaults shown):
+
+```python
+@dataclass
+class Priors:
+    init_mean: float = 0.0    # initial position mean
+    init_std:  float = 0.01   # initial position std
+    pos_std:   float = 0.1    # per-step position noise
+    rot_std:   float = 0.1    # per-step rotation noise (radians)
+    total_iter: int  = 40     # expected iterations (used by scheduler)
+    x_min: float = -1.0       # XZ bounding box for proposals
+    x_max: float =  1.0
+    z_min: float = -1.0
+    z_max: float =  1.0
+```
+
+Pass per-object priors at construction: `Parallel_Mesh(..., priors=Priors(pos_std=0.05))`.
+`obj.set_proposal()` returns `(priors, num_worlds)` — used internally by `ImportanceSampling._gen_proposals`.
 
 ## Key Conventions
 
@@ -79,29 +100,57 @@ Order matters for `allocs` tracking:
 
 ## Likelihood Functions
 
-Two likelihood modes live in `likelihood/likelihoods_physics.py` on `Likelihood_Physics_Parallel`:
+`Likelihood_Physics_Parallel` in `likelihood/likelihoods_physics.py`:
 
 - `new_proposal_likelihood_still_batch(scene)` — batch render current positions, no physics. Returns `(num_worlds,)` numpy array of scores relative to baseline.
-- `new_proposal_likelihood_physics_batch(scene)` — run XPBD forward sim for `frames` steps, render at `eval_every` checkpoints, average. Slower but accounts for physical plausibility.
+- `new_proposal_likelihood_physics_batch(scene)` — run XPBD forward sim for `frames` steps, save CPU snapshots every `eval_every` frames, batch render + average. Slower but accounts for physical plausibility.
 
-Both subtract `self.baseline_score` (self-comparison of the target point cloud).
+Both subtract `self.baseline_score` (self-comparison of the target point cloud). The physics eval stores body_q snapshots as numpy arrays and replays them via a single reusable `_render_state`.
+
+Camera setup: `setup_depth_camera(model, eye, target, width, height, num_worlds)` — note `num_worlds` is required. It builds a `(1, num_worlds)` `camera_transforms` array so every parallel world uses the same viewpoint correctly.
 
 ## Sampler (`sampling/parallel_mh.py`)
 
-`ParallelPhysicsMHSampler` takes `objects` dict (same structure as scene function return). `run_single_body_sampling(obj, total_iter, physics=False)`:
-1. `SixDOFProposal(obj)` — uses `obj.num_worlds` to size proposals
-2. `initial_positions()` → `(num_worlds, 7)` array, identity quaternion, small Gaussian position
-3. Loop: `propose_batch` picks top-5 by score, repeats+perturbs → new `(num_worlds, 7)` proposals
-4. After loop: `place_final_position` takes best score, replicates across all worlds, locks body
+The sampler class is `ImportanceSampling`. Two run modes:
+
+**`run_sampling_linear_print(debug=False)`** — sequential placement:
+1. For each observed object: `run_single_body_sampling(obj, iter_per_obj, physics=False)`
+2. For each unobserved object: `run_single_body_sampling(obj, iter_per_obj, physics=True)`
+3. Calls `_give_final_positions()` at the end
+
+**`run_sampling_gibbs(iters, debug, burn_in)`** — Gibbs sampling:
+1. Burn-in: `run_single_body_sampling` for each object (no physics, `count=False`)
+2. Loop: randomly choose an object, call `run_single_sample` (physics, `count=True`)
+3. Calls `_give_final_positions()` at the end
+
+### `run_single_body_sampling` inner loop
+
+```
+initial_positions()  →  (num_worlds, 7) near init_mean ± init_std, Y ≥ 0
+move_6dof_wp → score
+for each iteration:
+    _generate_positions(positions, scores)  →  softmax resample, top world pinned at [0]
+    propose_general(positions, epoch, count)  →  add Gaussian noise, clip to XZ bounds
+    move_6dof_wp → score
+    _update_all_worlds(scores)              →  particle-filter resample across all objects
+_give_final_positions()                     →  one final physics pass, pick top world
+```
+
+### Key internal methods
+
+- **`_generate_positions(position, scores)`**: computes `softmax(scores)`, pins the top world at index 0, resamples the rest with replacement — so the best candidate is always preserved.
+- **`_update_all_worlds(scores)`**: after each iteration, resamples all objects' body_q rows together using the same softmax-weighted indices, keeping the worlds coherent across objects.
+- **`_give_final_positions()`**: runs `new_proposal_likelihood_physics_batch` once to get final scores, finds `top_world = argmax(scores)`, calls `obj.place_final_position(top_world, sample_state)` for every object.
 
 ## Proposal (`sampling/proposals.py`)
 
-`SixDOFProposal.propose_batch(pos, scores, cur_it, total_it)`:
-- Selects top `n=5` positions by score via `np.argpartition`
-- Repeats+truncates to `num_proposals` rows
-- Adds Gaussian noise to XYZ; perturbs rotation via axis-angle composition
+`SixDOFProposal(priors, num_worlds, seed, schedule="no_decay")`:
 
-`n=5` is hardcoded — will fail if `num_worlds < 5`.
+- `initial_positions()` → `(num_worlds, 7)` from `Normal(init_mean, init_std)`, `Y = abs(Y)`, identity quaternion.
+- `propose_general(positions, epoch_num, count)` → adds noise to rows `[1:]` (row 0 is the pinned best), clips X and Z to bounds, perturbs rotation via axis-angle. If `count=True`, records `pos_std/rot_std` for plotting.
+- `get_std()` → applies the schedule to `priors.pos_std` / `priors.rot_std` using `self.cur_iters` and `priors.total_iter`.
+
+Available schedules (passed as string): `"no_decay"`, `"linear"`, `"exp"`.
 
 ## Architecture Diagram
 
@@ -119,38 +168,34 @@ allocate_worlds(N)
                    ├── model.state()                → target_state
                    └── freeze_finalized_body()      → dynamic objects hidden
 
-Likelihood_Physics_Parallel(target_state, model)
-    └── renders target_state → correct_pointcloud (H,W,3)
+Likelihood_Physics_Parallel(target_state, model, num_worlds)
+    └── setup_depth_camera(..., num_worlds)  → camera_transforms (1, num_worlds)
+    └── renders target_state world-0 → correct_pointcloud (H,W,3)
     └── baseline_score = compute_likelihood_score(correct, correct)
 
-ParallelPhysicsMHSampler.run_sampling()
-    └── for each observed obj:  run_single_body_sampling(physics=False)
+ImportanceSampling.run_sampling_linear_print()
+    └── for each observed obj:   run_single_body_sampling(physics=False)
     └── for each unobserved obj: run_single_body_sampling(physics=True)
-         └── SixDOFProposal → proposals (num_worlds, 7)
+         └── initial_positions() → (num_worlds, 7)
+         └── _generate_positions + propose_general → new (num_worlds, 7)
          └── obj.move_6dof_wp(proposals, sample_state)
          └── likelihood_batch(sample_state) → (num_worlds,) scores
-         └── obj.place_final_position(best) → lock body
+         └── _update_all_worlds(scores) → resample body_q across all objects
+    └── _give_final_positions() → obj.place_final_position(top_world, sample_state)
 ```
 
 ---
 
-## Next Steps / Improvements
+## Known Issues / Next Steps
 
-**Bugs / Fragile Code**
-- `SixDOFProposal.propose_batch` hardcodes `n=5` — crashes if `NUM_WORLDS < 5`. Should be `n = min(5, num_proposals)`.
-- `ParallelPhysicsMHSampler.print_results` iterates all keys including `"static"`, but static objects never have `final_position` set — will print `None` or error if that changes.
-- `build_worlds` inserts dynamic objects with outer loop over worlds, inner loop over objects. This means `allocs` for each object is `[world_0_idx, world_1_idx, ...]` — correct, but the insertion pattern is fragile if object order changes between world iterations.
-- `Parallel_Mesh.unfreeze_finalized_body` places bodies at a random normal position, which may overlap with other objects. Should sample from a reasonable prior (e.g., above the table).
+**Still open**
+- `init_positions` path in `run_single_body_sampling` raises `NotImplementedError` — needed for warm-starting.
+- No convergence criterion — always runs for exactly `total_iter` / `iters` iterations.
+- `Parallel_Mesh.unfreeze_finalized_body` places bodies at random normal positions — may overlap other objects. Should respect `Priors` bounds.
+- No tests despite `pytest` being a dev dependency. At minimum: likelihood shape, proposal shape, `build_worlds` smoke test.
+- `simulation/mh.py` (`XZ_MH_Sampler`, `XZ_Physics_MH_Sampler`) is legacy single-object 2D sampling — consider archiving.
+- Scene design: all target positions currently at `(0,0,0)` — objects overlap, weakening the likelihood gradient. Should use distinct non-overlapping target positions.
 
-**Missing Features**
-- `init_positions` path in `run_single_body_sampling` raises `NotImplementedError` — needed for warm-starting from a previous run or prior.
-- No MH accept/reject step in `run_single_body_sampling` — currently pure importance sampling (greedy best-of-N). True MH would allow escaping local optima.
-- `SixDOFProposal._init_mean` and `_init_std` are hardcoded (`0.0`, `0.05`) — should be configurable per-object or inferred from scene bounds.
-- No convergence criterion — sampling always runs for exactly `total_iter` iterations.
-- `VideoVisualizer` / `PyVistaVisualizer` in `visualization/scene.py` are not wired into the parallel pipeline — no way to watch the sampling progress.
-
-**Quality / Infrastructure**
-- No tests exist despite `pytest` being a dev dependency. At minimum: likelihood shape tests, proposal shape tests, `build_worlds` smoke test.
-- `simulation/mh.py` (`XZ_MH_Sampler`, `XZ_Physics_MH_Sampler`) is legacy single-object 2D sampling — consider removing or archiving to reduce confusion.
-- `simulation/run_parallel_sampling.py`, `accelerated_depth.py`, `accelerated_sampling.py` appear to be older experiments — unclear if still valid.
-- `build_worlds` could become a standalone utility in `parallel_builder.py` rather than living in each experiment script.
+**Recently fixed**
+- `camera_transforms` was `(1,1)` — caused garbage point clouds for all worlds except world 0. Fixed: now `(1, num_worlds)`.
+- `np.clip` missing `a_max` in `propose_general` — fixed to `np.clip(..., 0.0, None)`.
