@@ -16,7 +16,7 @@ from scene_physics.visualization.scene import PhysicsVideoVisualizer
 
 SIM_SECONDS = 3
 SIM_FPS     = 40
-OUTPUT      = "recordings/physics/scene02_.mp4"
+OUTPUT      = "recordings/physics/scene02.mp4"
 
 PYVISTA_CAMERA = [(4., 4., 4.), (0., 0., 0.), (0, 1, 0)]
 
@@ -34,13 +34,13 @@ def main():
         material=Dynamic_Material,
         name="battery",
     )
-    # circle = Parallel_Mesh(
-    #     body_file=f"{SCENE_ROOT}/CIRCULAR.obj",
-    #     position=(0.1, 1.0, 0.1),
-    #     target_position=(0., 0., 0.),
-    #     material=Dynamic_Material,
-    #     name="circle",
-    # )
+    circle = Parallel_Mesh(
+        body_file=f"{SCENE_ROOT}/CIRCULAR.obj",
+        position=(0.1, 1.0, 0.1),
+        target_position=(0., 0., 0.),
+        material=Dynamic_Material,
+        name="circle",
+    )
     table = Parallel_Static_Mesh(
         body_file=f"{SCENE_ROOT}/TABLE.obj",
         position=(0., 0., 0.),
@@ -52,7 +52,7 @@ def main():
     # PhysicsVideoVisualizer starts physics from final_position.
     # Set to the starting poses above: [x, y, z, qx, qy, qz, qw].
     battery.final_position   = np.array([ 9.9889427e-02, -1.7543495e-02, -8.9898050e-02, -7.4992753e-03, -1.6852148e-04, -6.5252934e-05, 9.9997187e-01], dtype=np.float32)
-    # circle.final_position = np.array([0., 0., 0., 0., 0., 0., 1.], dtype=np.float32)
+    circle.final_position = np.array([0., 0., 0., 0., 0., 0., 1.], dtype=np.float32)
 
     objects = {"observed": [], "unobserved": [battery], "static": [table]}
 

@@ -136,8 +136,6 @@ def main():
     video_visualizer.render_final_scene(f"{LOCATION}/final_state.mp4")
 
 
-    
-
 if __name__ == "__main__":
     main()
 
