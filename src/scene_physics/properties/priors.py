@@ -19,3 +19,18 @@ class Priors:
     x_min: float= -1.0
     z_max: float=1.0
     z_min: float=-1.0
+
+@dataclass
+class SimulationObjects:
+    """
+    Holds all the objects for forward physics simulation
+    """
+
+    observed: list = field(default_factory=list)
+    unobserved: list = field(default_factory=list)
+    static: list = field(default_factory=list)
+
+    @property
+    def all(self):
+        return self.observed + self.unobserved
+

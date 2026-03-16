@@ -257,6 +257,10 @@ class Parallel_Mesh:
         mesh.transform(transform_matrix, inplace=True)
         return mesh
 
+    def set_final_position_to_target(self):
+        """Sets the final position so can do render"""
+        self.final_position = self.target_position
+
     def to_pyvista_final(self, *_):
         """Plots final scene after sampling"""
 
@@ -305,6 +309,9 @@ class Parallel_Static_Mesh(Parallel_Mesh):
 
     def insert_object(self, mw, i):
         raise TypeError("Use insert_object_static — static meshes are inserted once for all worlds.")
+
+    def set_final_position_to_target(self):
+        raise TypeError("Cannot use set_final_position_to_target on static mesh")
 
     def to_pyvista(self, numpy_bd_q, world_id):
         """

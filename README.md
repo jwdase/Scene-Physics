@@ -14,6 +14,18 @@ He points out how we make an inference that there exists pins to hold up the obj
 ## Why it is Interesting
 This project is interesting for two reasons. First, it is a more novel approach to 3D scene reconstruction. Second, it could give us more insight into whether or not a physics engine plays a significant role in human scene reconstruction. If the model has similar performance to humans in predicting where objects go in 3D space (maybe falling for the same illusions as humans), then it creates compelling evidence that humans use physics engines in 3D reconstructions. 
 
+# Running Code
+For imports to run correctly, you must specify the correct directory to run from. Currently, to run a scene, the best command to use is.
+
+```PYTHONPATH=. uv run simulation/scene01.py```
+
+## Creating a Testing Scene
+When loading in a testing scene,
+1. Load objects into `objects/scenexx` where `xx` refers to test number
+1. Under `simulation/scenes` create a new folder names `scenexx` with the same `xx` as the objects folder
+1. Create a simulation of the scene following conventions in `simulation/scenes/scene01/simulation.py` and view to ensure that target is a stable scene
+1. Run sampling following conventions from `simulation/scenes/scene01/sampling.py`
+
 # General Organization
 
 ## Dependencies
@@ -37,8 +49,6 @@ This project is interesting for two reasons. First, it is a more novel approach 
 - ```Scene-Physics/tasks``` has scrap code for experimenting
 
 
-# Running Code
-For imports to run correctly, you must specify the correct directory to run from. Currently, to run a scene, the best command to use is.
 
-```PYTHONPATH=. python simulation/scene01.py```
+
 
