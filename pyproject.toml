@@ -1,7 +1,8 @@
 [project]
 name = "scene-physics"
 version = "0.1.0"
-description = ""
+description = "GPU-parallel physics simulation for probabilistic 3D scene reconstruction"
+license = "MIT"
 authors = [
     {name = "jwdase", email = "jwdase@mit.edu"}
 ]

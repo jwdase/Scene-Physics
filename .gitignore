@@ -225,7 +225,7 @@ __marimo__/
 *.zip
 
 # Experiment recordings
-src/scene_physics/recordings/
+recordings/
 
 # Warp GPU cache
 warp_cache/

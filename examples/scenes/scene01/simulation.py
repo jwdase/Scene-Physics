@@ -17,8 +17,8 @@ from scene_physics.simulation.simulation import run_physics_sim_target
 # ─── Configuration ───────────────────────────────────────────────────────────
 OUTPUT      = "recordings/physics/scene01.mp4"
 PYVISTA_CAMERA = [(4., 4., 4.), (0., 0., 0.), (0, 1, 0)]
-PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-SCENE_ROOT   = os.path.join(PACKAGE_ROOT, "objects", "scene01")
+EXAMPLES_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+SCENE_ROOT   = os.path.join(EXAMPLES_ROOT, "objects", "scene01")
 
 # ─── Main ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":

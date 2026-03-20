@@ -11,28 +11,24 @@ from newton.solvers import SolverXPBD
 
 from scene_physics.properties.shapes import Parallel_Mesh
 
+DEFAULT_CAMERA= [(20, 20, 20), (0, 0, 0), (0, 1, 0),]
+
+
 class PyVistaVisualizer:
     """
     General class for visual inputs
     """
-    def __init__(self, bodies, num_worlds, camera_pos=None, background_color='white'):
-        self.bodies = self._get_bodies(bodies)
-        self.camera_pos = camera_pos if camera_pos is not None else self._gen_camera()
+    def __init__(self, bodies, num_worlds, camera_pos=DEFAULT_CAMERA, background_color='white'):
+        self.bodies = bodies.all_bodies
+        self.camera_pos = camera_pos 
         self.background_color = background_color
         self.color = self._gen_colors()
         self.num_worlds = num_worlds
-
-    def _get_bodies(self, bodies):
-        return bodies["observed"] + bodies["static"] + bodies["unobserved"]
-
-    def _gen_camera(self):
-        return [(20, 20, 20), (0, 0, 0), (0, 1, 0),]
 
     def _gen_colors(self):
         num_bodies = len(self.bodies)
         colors = ["green", "blue", "white", "black", "yellow",]
         return [colors[i % len(colors)] for i in range(num_bodies)]
-
 
     def _fill_scene(self, scene, world_id, func=None):
         """
@@ -150,8 +146,6 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
             solver.step(state_0, state_1, control, contacts, dt)
             history.append(state_1.body_q.numpy().copy())
             state_0, state_1 = state_1, state_0
-
-        print(np.array(history)[-1])
 
         return history
 

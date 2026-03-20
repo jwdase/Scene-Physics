@@ -18,14 +18,18 @@ class Parallel_Mesh:
 
     OFF_POSITION = np.array((0., -1_000., 0.))
 
-    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None, target_position=None, priors=None):
+    def __init__(self, body_file, material=None, mass=None, position=None, quat=None, name=None, target_position=None, target_quat=None, priors=None):
         # Physical properties
         self.mass = 0.0 if mass is None else mass
         self.position = wp.vec3(0., 0., 0.) if position is None else wp.vec3(*position)
         self.quat = quat if quat is not None else wp.quat_identity()
+
         self.cfg = Material().to_cfg() if material is None else material.to_cfg()
         self.name = name
+        
+        # Hidden for comparison at end
         self.target_position = wp.vec3(0., 0., 0.) if target_position is None else wp.vec3(*target_position)
+        self.target_quaternian = wp.quat_identity() if target_quat is None else wp.quat(*target_quat)
 
         # Load and convert mesh representations
         self.pv_mesh = self._load_mesh(body_file)   # PyVista mesh for visualization
@@ -255,16 +259,18 @@ class Parallel_Mesh:
         assert np.all(np.isfinite(transform_matrix)), "Transform matrix contains non-finite values!"
 
         mesh.transform(transform_matrix, inplace=True)
+
         return mesh
 
     def set_final_position_to_target(self):
         """Sets the final position so can do render"""
-        self.final_position = self.target_position
+        self.final_position = np.concatenate((np.array(self.target_position), np.array(self.target_quaternian)))
 
     def to_pyvista_final(self, *_):
         """Plots final scene after sampling"""
 
         assert self.final_position is not None, "Position must be finalized before"
+
         return self.pyvista_body(self.final_position)
 
 

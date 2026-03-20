@@ -57,7 +57,7 @@ class ImportanceSampling:
         self.likelihoods = []
 
     def _get_objects(self):
-        return self.objects["observed"] + self.objects["unobserved"]
+        return self.objects.all_sampled
 
     def _gen_proposals(self, proposal):
         """
@@ -289,8 +289,7 @@ class ImportanceSampling:
             obj = objects[choice]
             self.run_single_sample(obj, epoch=i, debug=debug, count=True)
 
-            if i % 10 == 0:
-                print(f"Epoch: {i}, object: {obj} ")
+            print(f"Epoch: {i}, object: {obj} ")
 
         # Give final positions to objects
         self._give_final_positions()
@@ -308,7 +307,7 @@ class ImportanceSampling:
         # Insert observed objects
         print("============")
         print("Non Physics Sampling")
-        for obj in self.objects["observed"]:
+        for obj in self.objects.observed:
             print(f"Working on obj: {obj.name}")
             self.run_single_body_sampling(
                 obj, self.iter_per_obj, object_num, debug=debug, physics=False
@@ -318,7 +317,7 @@ class ImportanceSampling:
         # Insert unobserved objects
         print("============")
         print("Physics Sampling")
-        for obj in self.objects["unobserved"]:
+        for obj in self.objects.unobserved:
             print(f"Working on obj: {obj.name}")
             self.run_single_body_sampling(
                 obj, self.iter_per_obj, object_num, debug=debug, physics=True
@@ -330,9 +329,8 @@ class ImportanceSampling:
 
     def print_results(self):
         """Prints final position of each object"""
-        for obj_type, obj_list in self.objects.items():
-            for obj in obj_list:
-                print(f"Object: {obj.name} was placed at {obj.final_position}")
+        for obj in self.objects.all_bodies:
+            print(f"Object: {obj.name} was placed at {obj.final_position}")
 
     # ========== CLAUDE SECTION ==============
 

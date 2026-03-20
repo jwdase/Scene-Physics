@@ -31,6 +31,13 @@ class SimulationObjects:
     static: list = field(default_factory=list)
 
     @property
-    def all(self):
+    def all_sampled(self):
+        """Returns sampled objects"""
         return self.observed + self.unobserved
+
+    @property
+    def all_bodies(self):
+        """Returns all objects"""
+        return self.observed + self.static + self.unobserved
+
 

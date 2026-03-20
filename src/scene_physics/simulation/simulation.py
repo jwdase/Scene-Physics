@@ -24,15 +24,15 @@ def run_physics_sim_target(objects, path, sim_seconds=SIM_SECONDS, sim_fps=SIM_F
     """
     
     # Places in finalized positions
-    for obj in objects.all:
+    for obj in objects.all_sampled:
         if isinstance(obj, Parallel_Static_Mesh):
             continue
-        obj.set_final_positions_to_target()
+        obj.set_final_position_to_target()
 
     # Ensures good directory
     path_parts = path.split("/")
     if len(path_parts) > 1:
-        os.makedirs("".join(path[:-1]))
+        os.makedirs("/".join(path_parts[:-1]), exist_ok=True)
 
     # Rendering simulation
     print("Rendering Simulation")
