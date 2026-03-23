@@ -299,6 +299,22 @@ class Parallel_Static_Mesh(Parallel_Mesh):
           super().__init__(**kwargs)
           self.final_position = np.array([0., 0., 0., 0., 0., 0., 1.])
 
+    def _convert_mesh(self):
+        """Use the actual triangle mesh for collision, not a convex hull.
+
+        Static bodies like tables have complex geometry (legs, apron) that
+        produces inaccurate hull normals when approximated with maxhullvert=64.
+        The tabletop surface is flat, so triangle mesh collision gives exact
+        (0,1,0) contact normals and a precise contact height, preventing
+        dynamic objects from slipping through.
+
+        Static bodies don't move, so compute_inertia is unnecessary.
+        """
+        self.pv_mesh.compute_normals(inplace=True)
+        verts = self.pv_mesh.points.astype(np.float32)
+        faces = self.pv_mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        return newton.Mesh(verts, faces, compute_inertia=False, is_solid=False)
+
     def insert_object_static(self, mw):
         """
         Insert this body as a global (world -1) object shared by all worlds.
