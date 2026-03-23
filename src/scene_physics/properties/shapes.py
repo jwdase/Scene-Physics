@@ -225,10 +225,15 @@ class Parallel_Mesh:
 
     def _convert_mesh(self):
         """Convert the PyVista mesh into a Newton collision mesh."""
-        self.pv_mesh.compute_normals(inplace=True)
-        verts = self.pv_mesh.points.astype(np.float32)
-        faces = self.pv_mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=64)
+        mesh = self.pv_mesh.extract_surface().clean()
+        mesh.compute_normals(
+            inplace=True,
+            consistent_normals=True,
+            auto_orient_normals=True,
+        )
+        verts = mesh.points.astype(np.float32)
+        faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=256)
 
     # ------------------------------------------------------------------
     # Visualization
@@ -310,9 +315,14 @@ class Parallel_Static_Mesh(Parallel_Mesh):
 
         Static bodies don't move, so compute_inertia is unnecessary.
         """
-        self.pv_mesh.compute_normals(inplace=True)
-        verts = self.pv_mesh.points.astype(np.float32)
-        faces = self.pv_mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        mesh = self.pv_mesh.extract_surface().clean()
+        mesh.compute_normals(
+            inplace=True,
+            consistent_normals=True,
+            auto_orient_normals=True,
+        )
+        verts = mesh.points.astype(np.float32)
+        faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
         return newton.Mesh(verts, faces, compute_inertia=False, is_solid=False)
 
     def insert_object_static(self, mw):
