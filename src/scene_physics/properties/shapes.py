@@ -223,6 +223,7 @@ class Parallel_Mesh:
         """Accept either a file path or an already-loaded PyVista mesh."""
         return file if isinstance(file, pv.core.pointset.PolyData) else pv.read(file)
 
+<<<<<<< HEAD
     def _get_face_vert(self):
         """Extract feautures for conversion"""
         self.pv_mesh = self.pv_mesh.triangulate()
@@ -245,6 +246,19 @@ class Parallel_Mesh:
         faces, verts = self._get_face_vert()
         return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=maxhullvert)
 
+=======
+    def _convert_mesh(self):
+        """Convert the PyVista mesh into a Newton collision mesh."""
+        mesh = self.pv_mesh.extract_surface().clean()
+        mesh.compute_normals(
+            inplace=True,
+            consistent_normals=True,
+            auto_orient_normals=True,
+        )
+        verts = mesh.points.astype(np.float32)
+        faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=256)
+>>>>>>> claude/fix-physics-collisions-wNWaL
 
     # ------------------------------------------------------------------
     # Visualization
@@ -318,6 +332,27 @@ class Parallel_Static_Mesh(Parallel_Mesh):
     def __init__(self, **kwargs):
           super().__init__(**kwargs)
           self.final_position = np.array([0., 0., 0., 0., 0., 0., 1.])
+
+    def _convert_mesh(self):
+        """Use the actual triangle mesh for collision, not a convex hull.
+
+        Static bodies like tables have complex geometry (legs, apron) that
+        produces inaccurate hull normals when approximated with maxhullvert=64.
+        The tabletop surface is flat, so triangle mesh collision gives exact
+        (0,1,0) contact normals and a precise contact height, preventing
+        dynamic objects from slipping through.
+
+        Static bodies don't move, so compute_inertia is unnecessary.
+        """
+        mesh = self.pv_mesh.extract_surface().clean()
+        mesh.compute_normals(
+            inplace=True,
+            consistent_normals=True,
+            auto_orient_normals=True,
+        )
+        verts = mesh.points.astype(np.float32)
+        faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
+        return newton.Mesh(verts, faces, compute_inertia=False, is_solid=False)
 
     def insert_object_static(self, mw):
         """

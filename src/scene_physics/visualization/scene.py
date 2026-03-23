@@ -90,12 +90,29 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
     ):
         super().__init__(bodies, None, camera_pos, background_color)
 
-    def render_final_scene(self, output_filename, frames=200, dt=0.016, fps=60):
-        """Creates a render of the final scene"""
-        
+    def render_final_scene(self, output_filename, frames=200, dt=0.016, fps=60,
+                           substeps=4, iterations=16, settling_frames=50):
+        """Creates a render of the final scene
+
+        Args:
+            output_filename: path for the output .mp4
+            frames: number of visible frames to record
+            dt: total time per visible frame (subdivided by substeps)
+            fps: playback framerate for the output video
+            substeps: physics substeps per visible frame (higher = more stable)
+            iterations: XPBD constraint solver iterations per substep
+            settling_frames: physics frames (at substep dt) to run before
+                recording, allowing small initial penetrations to resolve
+        """
+
         # Build the worlds and run physics
         model, body_idx = self._build_worlds()
-        history = self.run_forward_physics(model, frames, dt)
+        history = self.run_forward_physics(
+            model, frames, dt,
+            substeps=substeps,
+            iterations=iterations,
+            settling_frames=settling_frames,
+        )
 
         # Render to target destination
         self.render(history, body_idx, output_filename, fps)
@@ -131,23 +148,58 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
                 wp.quat(float(pos[3]), float(pos[4]), float(pos[5]), float(pos[6])),
             )
 
-    def run_forward_physics(self, model, frames, dt):
-        """Runs forward physics and generates a history of the movement"""
+    def run_forward_physics(self, model, frames, dt, substeps=4,
+                            iterations=16, settling_frames=50):
+        """Runs forward physics and generates a history of the movement.
 
-        solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=16, angular_damping=0.3, enable_restitution=False)
+        Uses substeps to subdivide each visible frame into smaller physics
+        steps, which makes XPBD much more robust against small initial
+        penetrations and thin-geometry tunneling.
+
+        Args:
+            model: finalized Newton Model
+            frames: number of visible frames to record
+            dt: total time per visible frame (subdivided by substeps)
+            substeps: number of physics steps per visible frame
+            iterations: XPBD solver iterations per substep
+            settling_frames: extra physics steps (at sub_dt) run before
+                recording begins, so initial overlaps are resolved gently
+        """
+        sub_dt = dt / substeps
+
+        solver = SolverXPBD(
+            model,
+            rigid_contact_relaxation=0.75,
+            iterations=iterations,
+            angular_damping=0.2,
+            enable_restitution=False,
+        )
         control = model.control()
 
         state_0 = model.state()
         state_1 = model.state()
 
-        # Run forward sim, collecting body_q snapshots
-        history = [state_0.body_q.numpy().copy()]
-        for _ in range(frames):
+        # Settling phase: resolve small initial penetrations before recording.
+        # Uses heavier damping so objects don't gain momentum from overlap
+        # correction.
+        for _ in range(settling_frames):
             state_0.clear_forces()
             contacts = model.collide(state_0)
-            solver.step(state_0, state_1, control, contacts, dt)
-            history.append(state_1.body_q.numpy().copy())
+            solver.step(state_0, state_1, control, contacts, sub_dt)
             state_0, state_1 = state_1, state_0
+
+        # Zero out velocities after settling so objects start at rest
+        state_0.body_qd.zero_()
+
+        # Record visible frames, each subdivided into substeps
+        history = [state_0.body_q.numpy().copy()]
+        for _ in range(frames):
+            for _sub in range(substeps):
+                state_0.clear_forces()
+                contacts = model.collide(state_0)
+                solver.step(state_0, state_1, control, contacts, sub_dt)
+                state_0, state_1 = state_1, state_0
+            history.append(state_0.body_q.numpy().copy())
 
         return history
 

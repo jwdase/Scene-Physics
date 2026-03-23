@@ -104,9 +104,9 @@ class Likelihood_Physics_Parallel:
     def _get_solver(self):
         return SolverXPBD(
             self.model,
-            rigid_contact_relaxation=0.9,
-            iterations=4,
-            angular_damping=0.1,
+            rigid_contact_relaxation=0.75,
+            iterations=16,
+            angular_damping=0.2,
             enable_restitution=False,
         )
 
