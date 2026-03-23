@@ -192,13 +192,17 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
             solver.step(state_0, state_1, control, contacts, sub_dt)
             state_0, state_1 = state_1, state_0
 
-        # Zero out velocities after settling so objects start at rest
+        # Zero out velocities on both states after settling so objects start at
+        # rest. state_1 also needs zeroing in case the solver warmstarts from it.
         state_0.body_qd.zero_()
+        state_1.body_qd.zero_()
 
         # Record visible frames, each subdivided into substeps.
         # Linear damping is applied once per visible frame to prevent slow
-        # energy accumulation over long simulations. The numpy round-trip is
-        # done per-frame (not per-substep) to keep GPU↔CPU transfers minimal.
+        # energy accumulation over long simulations. Uses assign() for in-place
+        # modification so Newton's internal device-pointer references remain
+        # valid (replacing via = wp.from_numpy() would create a new array that
+        # the solver never sees).
         damping_factor = 1.0 - linear_damping
         history = [state_0.body_q.numpy().copy()]
         for _ in range(frames):
@@ -207,11 +211,14 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
                 contacts = model.collide(state_0)
                 solver.step(state_0, state_1, control, contacts, sub_dt)
                 state_0, state_1 = state_1, state_0
-            # Damp all velocities to prevent unbounded energy accumulation.
-            # Applied once per frame to keep GPU↔CPU transfers minimal.
+            # Damp velocities in-place to prevent unbounded energy accumulation.
+            # Applied once per frame (not per substep) to minimise GPU↔CPU
+            # transfers. Both linear and angular components are damped equally
+            # here; the solver's angular_damping handles per-substep angular
+            # attenuation separately.
             vel = state_0.body_qd.numpy()
             vel *= damping_factor
-            state_0.body_qd = wp.from_numpy(vel, dtype=state_0.body_qd.dtype, device="cuda")
+            state_0.body_qd.assign(wp.from_numpy(vel, dtype=state_0.body_qd.dtype, device="cuda"))
             history.append(state_0.body_q.numpy().copy())
 
         return history
