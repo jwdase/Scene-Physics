@@ -13,5 +13,17 @@ class Material:
         self.density = density
         self.is_solid = True
 
-    def to_cfg(self): 
-        return ModelBuilder.ShapeConfig(restitution=self.restitution, mu=self.mu, is_solid=self.is_solid, density=self.density, has_shape_collision=True)
+    def to_cfg(self):
+        cfg = ModelBuilder.ShapeConfig(
+            restitution=self.restitution,
+            mu=self.mu,
+            is_solid=self.is_solid,
+            density=self.density,
+            has_shape_collision=True,
+        )
+        # Pass contact stiffness/damping if Newton's ShapeConfig supports them
+        if hasattr(cfg, "contact_ke"):
+            cfg.contact_ke = self.contact_ke
+        if hasattr(cfg, "contact_kd"):
+            cfg.contact_kd = self.contact_kd
+        return cfg
