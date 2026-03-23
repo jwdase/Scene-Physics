@@ -225,7 +225,7 @@ class Parallel_Mesh:
 
     def _convert_mesh(self):
         """Convert the PyVista mesh into a Newton collision mesh."""
-        mesh = self.pv_mesh.extract_surface().clean()
+        mesh = self.pv_mesh.extract_surface().clean().triangulate()
         mesh.compute_normals(
             inplace=True,
             consistent_normals=True,
@@ -233,7 +233,7 @@ class Parallel_Mesh:
         )
         verts = mesh.points.astype(np.float32)
         faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=256)
+        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=512)
 
     # ------------------------------------------------------------------
     # Visualization
@@ -342,18 +342,6 @@ class Parallel_Static_Mesh(Parallel_Mesh):
 
         body = mw.add_body(xform=wp.transform(self.position, self.quat))
         mw.add_shape_mesh(body=body, mesh=self.nt_mesh, cfg=self.cfg)
-
-    def _convert_mesh(seld):
-        """
-        For static objects we will give more complex geometry representations
-        because the body does not move
-
-        We want to use
-            is_solid = False for static objects (Triangle Mesh)
-            is_solid = True for dynamic objects (Convex Hull)
-        """
-        faces, verts = self._get_face_vert()
-        return newton.Mesh(verts, faces, compute_inertia=False, is_solid=False)
 
 
     def insert_object(self, mw, i):
