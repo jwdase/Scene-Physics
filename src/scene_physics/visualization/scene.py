@@ -136,7 +136,7 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
             b = builder.add_body(self._get_xform(body, y_offset=lift))
             builder.add_shape_mesh(body=b, mesh=body.nt_mesh, cfg=body.cfg)
 
-        return builder.finalize(validate_inertia_detailed=True), body_idx
+        return builder.finalize(), body_idx
 
     @staticmethod
     def _get_xform(body, y_offset=0.0):
