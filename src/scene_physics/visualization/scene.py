@@ -9,7 +9,7 @@ import warp as wp
 from newton.solvers import SolverXPBD
 
 
-from scene_physics.properties.shapes import Parallel_Mesh
+from scene_physics.properties.shapes import Parallel_Mesh, Parallel_Static_Mesh
 
 DEFAULT_CAMERA= [(20, 20, 20), (0, 0, 0), (0, 1, 0),]
 
@@ -115,15 +115,17 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
         body_idx = {}
         for body in self.bodies:
             body_idx[hash(body)] = len(builder.body_q)
-            b = builder.add_body(self._get_xform(body))
+            lift = 0.02 if not isinstance(body, Parallel_Static_Mesh) else 0.0
+            b = builder.add_body(self._get_xform(body, y_offset=lift))
             builder.add_shape_mesh(body=b, mesh=body.nt_mesh, cfg=body.cfg)
 
         return builder.finalize(), body_idx
 
     @staticmethod
-    def _get_xform(body):
-        """Creates x_form for body insert"""
-        pos = body.final_position  # [x, y, z, qx, qy, qz, qw]
+    def _get_xform(body, y_offset=0.0):
+        """Creates x_form for body insert, with optional vertical offset to prevent initial penetration."""
+        pos = body.final_position.copy()  # [x, y, z, qx, qy, qz, qw]
+        pos[1] += y_offset
         return wp.transform(
                 pos[:3].tolist(),
                 wp.quat(float(pos[3]), float(pos[4]), float(pos[5]), float(pos[6])),
@@ -132,7 +134,7 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
     def run_forward_physics(self, model, frames, dt):
         """Runs forward physics and generates a history of the movement"""
 
-        solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=4, angular_damping=0.1, enable_restitution=False)
+        solver = SolverXPBD(model, rigid_contact_relaxation=0.9, iterations=16, angular_damping=0.3, enable_restitution=False)
         control = model.control()
 
         state_0 = model.state()

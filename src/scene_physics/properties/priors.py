@@ -40,4 +40,24 @@ class SimulationObjects:
         """Returns all objects"""
         return self.observed + self.static + self.unobserved
 
+    def __getitem__(self, key):
+        if hasattr(self, key):
+            return getattr(self, key)
+        raise KeyError(f"{key} is not a valid field")
+
+    def __str__(self):
+        print("======= Observed =======")
+        for obj in self.observed:
+            print(obj.name)
+
+        print("======= Unobserved =======")
+        for obj in self.unobserved:
+            print(obj.name)
+
+        print("======= Static ========")
+        for obj in self.static:
+            print(obj.name)
+
+        return ""
+
 

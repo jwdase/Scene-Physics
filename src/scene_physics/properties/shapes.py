@@ -223,12 +223,28 @@ class Parallel_Mesh:
         """Accept either a file path or an already-loaded PyVista mesh."""
         return file if isinstance(file, pv.core.pointset.PolyData) else pv.read(file)
 
-    def _convert_mesh(self):
-        """Convert the PyVista mesh into a Newton collision mesh."""
+    def _get_face_vert(self):
+        """Extract feautures for conversion"""
+        self.pv_mesh = self.pv_mesh.triangulate()
         self.pv_mesh.compute_normals(inplace=True)
         verts = self.pv_mesh.points.astype(np.float32)
         faces = self.pv_mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=64)
+        return faces, verts
+
+    def _convert_mesh(self, maxhullvert=256):
+        """
+        Convert the pyvista mesh into collision mesh
+        because dynamic, we want 
+
+        Note: 
+            is_solid : True (Will use a convex hull approx of shape)
+            maxhullvert : is the maximum number of vertices
+            compute_inertia : solves intertia of each object
+        """
+
+        faces, verts = self._get_face_vert()
+        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=maxhullvert)
+
 
     # ------------------------------------------------------------------
     # Visualization
@@ -248,6 +264,10 @@ class Parallel_Mesh:
 
         position = transform[0:3]       # [x, y, z]
         quat_xyzw = transform[3:7]      # [qx, qy, qz, qw]
+
+        # Guard against zero-norm quaternions from the physics engine
+        if np.linalg.norm(quat_xyzw) < 1e-10:
+            quat_xyzw = np.array([0.0, 0.0, 0.0, 1.0])
 
         rotation = Rotation.from_quat(quat_xyzw)
         rotation_matrix = rotation.as_matrix()
@@ -313,6 +333,21 @@ class Parallel_Static_Mesh(Parallel_Mesh):
         body = mw.add_body(xform=wp.transform(self.position, self.quat))
         mw.add_shape_mesh(body=body, mesh=self.nt_mesh, cfg=self.cfg)
 
+    def _convert_mesh(seld):
+        """
+        For static objects we will give more complex geometry representations
+        because the body does not move
+
+        We want to use
+            is_solid = False for static objects (Triangle Mesh)
+            is_solid = True for dynamic objects (Convex Hull)
+        """
+        faces, verts = self._get_face_vert()
+        return newton.Mesh(verts, faces, compute_inertia=False, is_solid=False)
+
+        
+
+
     def insert_object(self, mw, i):
         raise TypeError("Use insert_object_static — static meshes are inserted once for all worlds.")
 
@@ -328,26 +363,3 @@ class Parallel_Static_Mesh(Parallel_Mesh):
         return self.pyvista_body(pos)
 
 
-class MeshBody(Parallel_Mesh):
-    """
-    A Parallel_Mesh restricted to a single world.
-
-    Simplifies the interface when parallel worlds are not needed —
-    insert_object takes no world index, and to_pyvista always uses world 0.
-    """
-
-    def insert_object(self, mw):
-        """
-        Insert this body into world 0.
-
-        Args:
-            mw : Newton MultiWorld builder
-        """
-        super().insert_object(mw, 0)
-
-    def to_pyvista(self, numpy_bd_q, world_id=0):
-        """
-        Return the mesh at its single-world position.
-        world_id is accepted for interface compatibility but always uses world 0.
-        """
-        return super().to_pyvista(numpy_bd_q, 0)
