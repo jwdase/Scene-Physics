@@ -223,30 +223,6 @@ class Parallel_Mesh:
         """Accept either a file path or an already-loaded PyVista mesh."""
         return file if isinstance(file, pv.core.pointset.PolyData) else pv.read(file)
 
-<<<<<<< HEAD
-    def _get_face_vert(self):
-        """Extract feautures for conversion"""
-        self.pv_mesh = self.pv_mesh.triangulate()
-        self.pv_mesh.compute_normals(inplace=True)
-        verts = self.pv_mesh.points.astype(np.float32)
-        faces = self.pv_mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return faces, verts
-
-    def _convert_mesh(self, maxhullvert=256):
-        """
-        Convert the pyvista mesh into collision mesh
-        because dynamic, we want 
-
-        Note: 
-            is_solid : True (Will use a convex hull approx of shape)
-            maxhullvert : is the maximum number of vertices
-            compute_inertia : solves intertia of each object
-        """
-
-        faces, verts = self._get_face_vert()
-        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=maxhullvert)
-
-=======
     def _convert_mesh(self):
         """Convert the PyVista mesh into a Newton collision mesh."""
         mesh = self.pv_mesh.extract_surface().clean()
@@ -258,7 +234,6 @@ class Parallel_Mesh:
         verts = mesh.points.astype(np.float32)
         faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
         return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=256)
->>>>>>> claude/fix-physics-collisions-wNWaL
 
     # ------------------------------------------------------------------
     # Visualization
@@ -379,8 +354,6 @@ class Parallel_Static_Mesh(Parallel_Mesh):
         """
         faces, verts = self._get_face_vert()
         return newton.Mesh(verts, faces, compute_inertia=False, is_solid=False)
-
-        
 
 
     def insert_object(self, mw, i):
