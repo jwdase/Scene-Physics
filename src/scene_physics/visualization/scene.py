@@ -147,7 +147,8 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
             )
 
     def run_forward_physics(self, model, frames, dt, substeps=4,
-                            iterations=16, settling_frames=50):
+                            iterations=16, settling_frames=50,
+                            linear_damping=0.1):
         """Runs forward physics and generates a history of the movement.
 
         Uses substeps to subdivide each visible frame into smaller physics
@@ -162,12 +163,17 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
             iterations: XPBD solver iterations per substep
             settling_frames: extra physics steps (at sub_dt) run before
                 recording begins, so initial overlaps are resolved gently
+            linear_damping: per-frame linear velocity damping factor applied
+                after each recorded frame to prevent energy accumulation
         """
         sub_dt = dt / substeps
 
+        # rigid_contact_relaxation reduced from 0.75 → 0.4 to limit
+        # energy injection from XPBD contact overcorrection in persistent
+        # contacts (e.g. objects resting on a surface for many frames).
         solver = SolverXPBD(
             model,
-            rigid_contact_relaxation=0.75,
+            rigid_contact_relaxation=0.4,
             iterations=iterations,
             angular_damping=0.2,
             enable_restitution=False,
@@ -189,7 +195,11 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
         # Zero out velocities after settling so objects start at rest
         state_0.body_qd.zero_()
 
-        # Record visible frames, each subdivided into substeps
+        # Record visible frames, each subdivided into substeps.
+        # Linear damping is applied once per visible frame to prevent slow
+        # energy accumulation over long simulations. The numpy round-trip is
+        # done per-frame (not per-substep) to keep GPU↔CPU transfers minimal.
+        damping_factor = 1.0 - linear_damping
         history = [state_0.body_q.numpy().copy()]
         for _ in range(frames):
             for _sub in range(substeps):
@@ -197,6 +207,11 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
                 contacts = model.collide(state_0)
                 solver.step(state_0, state_1, control, contacts, sub_dt)
                 state_0, state_1 = state_1, state_0
+            # Damp all velocities to prevent unbounded energy accumulation.
+            # Applied once per frame to keep GPU↔CPU transfers minimal.
+            vel = state_0.body_qd.numpy()
+            vel *= damping_factor
+            state_0.body_qd = wp.from_numpy(vel, dtype=state_0.body_qd.dtype, device="cuda")
             history.append(state_0.body_q.numpy().copy())
 
         return history
