@@ -127,8 +127,9 @@ class ImportanceSampling:
         # Move positions in the scene and get scores
         if init_positions is None:
             prev_positions = proposor.initial_positions()
+        elif init_positions == "unif":
+            prev_positions = proposor.uniform_prior()
         else:
-            # TODO Implement This
             raise NotImplementedError("Unsure how to handle init_positions")
 
         # Move position in the scene and get score
@@ -261,6 +262,36 @@ class ImportanceSampling:
         self.likelihoods.append(scores)
         self._update_all_worlds(scores)
 
+    def run_occluded_sampling(self, iters=100, debug=False)
+        """
+        Runs sampling over just occluded body positions, ASSUMES that all other
+        objects are correctly placed already
+        """
+
+        oc_obj = self.objects.unobserved[0]
+
+        # Place all objects besides occluded at their target positions (one GPU roundtrip)
+        bodies = self.sample_state.body_q.numpy()
+        for obj in self.object_list:
+            if obj == oc_obj:
+                continue
+            bodies[obj.allocs, 0:3] = np.array(obj.target_position)
+            bodies[obj.allocs, 3:7] = np.array(obj.target_quaternian)
+
+        self.sample_state.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
+
+        # Place With Uniform Prior
+        self.run_single_body_sampling(oc_obj, 1, 0, physics=True, init_positions="unif", debug=debug)
+
+        # Run Sampling of Position
+        print("Beginning the Physics Sampling")
+        for i in range(iters):
+            self.run_single_sample(oc_obj, epoch=i, debug=debug, count=True)
+            print(f"Epoch: {i}, object: {oc_obj} ")
+
+        # Give final positions to objects
+        self._give_final_positions()
+
     def run_sampling_gibbs(self, iters=100, debug=False, burn_in=30, seed=42):
         """
         Run gibbs sampling on scene so that we do each object proposals
@@ -331,6 +362,7 @@ class ImportanceSampling:
         """Prints final position of each object"""
         for obj in self.objects.all_bodies:
             print(f"Object: {obj.name} was placed at {obj.final_position}")
+
 
     # ========== CLAUDE SECTION ==============
 

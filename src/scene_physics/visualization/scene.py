@@ -18,16 +18,17 @@ class PyVistaVisualizer:
     """
     General class for visual inputs
     """
-    def __init__(self, bodies, num_worlds, camera_pos=DEFAULT_CAMERA, background_color='white'):
+    def __init__(self, bodies, num_worlds, camera_pos=DEFAULT_CAMERA, cam_fov=None, background_color='white'):
         self.bodies = bodies.all_bodies
         self.camera_pos = camera_pos 
         self.background_color = background_color
         self.color = self._gen_colors()
         self.num_worlds = num_worlds
+        self.cam_fov = cam_fov
 
     def _gen_colors(self):
         num_bodies = len(self.bodies)
-        colors = ["green", "blue", "white", "black", "yellow",]
+        colors = ["green", "blue", "orange", "purple", "cyan", "teal"] 
         return [colors[i % len(colors)] for i in range(num_bodies)]
 
     def _fill_scene(self, scene, world_id, func=None):
@@ -86,9 +87,9 @@ class PyVistaVisualizer:
 
 class PhysicsVideoVisualizer(PyVistaVisualizer):
     def __init__(
-        self, bodies, FPS, camera_pos=None, background_color="white"
+        self, bodies, FPS, camera_pos=None, cam_fov=None, background_color="white"
     ):
-        super().__init__(bodies, None, camera_pos, background_color)
+        super().__init__(bodies, None, camera_pos, cam_fov, background_color)
 
     def render_final_scene(self, output_filename, frames=200, dt=0.016, fps=60,
                            substeps=4, iterations=16, settling_frames=50):
@@ -150,7 +151,7 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
 
     def run_forward_physics(self, model, frames, dt, substeps=4,
                             iterations=16, settling_frames=50,
-                            linear_damping=0.1):
+                            linear_damping=0.8):
         """Runs forward physics and generates a history of the movement.
 
         Uses substeps to subdivide each visible frame into smaller physics
@@ -173,13 +174,23 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
         # rigid_contact_relaxation reduced from 0.75 → 0.4 to limit
         # energy injection from XPBD contact overcorrection in persistent
         # contacts (e.g. objects resting on a surface for many frames).
+        # solver = SolverXPBD(
+        #    model,
+        #    rigid_contact_relaxation=0.4,
+        #    iterations=iterations,
+        #    angular_damping=0.1,
+        #    enable_restitution=False,
+        # )
+
         solver = SolverXPBD(
             model,
-            rigid_contact_relaxation=0.4,
-            iterations=iterations,
-            angular_damping=0.2,
-            enable_restitution=False,
+            iterations=150,                  # was 16 — resolves deep contacts
+            rigid_contact_relaxation=0.5,    # balanced: less overcorrection
+            rigid_contact_con_weighting=True, # distributes impulses by mass
+            angular_damping=0.8,             # was 0.2 — kills rotational drift fast
+             enable_restitution=False,
         )
+
         control = model.control()
 
         state_0 = model.state()
@@ -213,14 +224,6 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
                 contacts = model.collide(state_0)
                 solver.step(state_0, state_1, control, contacts, sub_dt)
                 state_0, state_1 = state_1, state_0
-            # Damp velocities in-place to prevent unbounded energy accumulation.
-            # Applied once per frame (not per substep) to minimise GPU↔CPU
-            # transfers. Both linear and angular components are damped equally
-            # here; the solver's angular_damping handles per-substep angular
-            # attenuation separately.
-            vel = state_0.body_qd.numpy()
-            vel *= damping_factor
-            state_0.body_qd.assign(wp.from_numpy(vel, dtype=state_0.body_qd.dtype, device="cuda"))
             history.append(state_0.body_q.numpy().copy())
 
         return history
@@ -236,15 +239,27 @@ class PhysicsVideoVisualizer(PyVistaVisualizer):
 
         # Plotter position and initial state
         plotter.camera_position = self.camera_pos
+
+        if self.cam_fov is not None:
+            plotter.camera.view_angle = self.cam_fov
         
         # Insert Actors
         actors = []
         for i, body in enumerate(self.bodies):
-            actor = plotter.add_mesh(
-                body.pyvista_body(history[0][body_idx[hash(body)]]),
-                color=self.color[i],
-                smooth_shading=True,
-            )
+            # Make static objects tan
+            if isinstance(body, Parallel_Static_Mesh):
+                actor = plotter.add_mesh(
+                            body.pyvista_body(history[0][body_idx[hash(body)]]),
+                            color = "burlywood",
+                            smooth_shading=True
+                        )
+            else:
+                actor = plotter.add_mesh(
+                    body.pyvista_body(history[0][body_idx[hash(body)]]),
+                    color=self.color[i],
+                    smooth_shading=True,
+                )
+
             actors.append((actor, body))
         
         # Run each frame

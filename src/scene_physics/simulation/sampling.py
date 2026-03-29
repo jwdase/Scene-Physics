@@ -26,6 +26,7 @@ DEFAULT_TARGET = np.array([0., 0., 0.])
 def run_importance_sampling(
     objects,
     location,
+    method="gibbs",
     num_worlds=500,
     iter_per_obj=50,
     total_iterations=100,
@@ -96,7 +97,12 @@ def run_importance_sampling(
         decay=decay,
     )
 
-    sampler.run_sampling_gibbs(iters=total_iterations, debug=debug, burn_in=burn_in)
+    if method == "gibbs":
+        sampler.run_sampling_gibbs(iters=total_iterations, debug=debug, burn_in=burn_in)
+    elif method == "occ":
+        sampler.run_occluded_sampling(iters=total_iterations, debug=debug)
+    else:
+        raise AssertionError, f"Sampling method {method} does not exist"
 
     # Results
     sampler.print_results()

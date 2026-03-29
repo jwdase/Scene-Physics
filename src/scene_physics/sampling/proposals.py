@@ -60,6 +60,32 @@ class SixDOFProposal:
         scale = self.schedulers(self.cur_iters, self.priors.total_iter)
         return self.priors.pos_std * scale, self.priors.rot_std * scale
 
+
+    def uniform_prior(self):
+        """
+        Initilize positions for object being samples with a 
+        complete uniform_prior - Sample only over (x, z) values
+        """
+
+        # ASSUMING CORRECT ROTATION: (0, 0, 0, 1) AND POS = (0, 0, 0)
+        sampled_data = np.array(
+                [
+                    (
+                        np.random.uniform(low=self.priors.x_min, high=self.priors.x_max),
+                        np.random.uniform(low=self.priors.z_min, high=self.priors.z_max),
+                     )
+                 ] for _ in range(self.num)
+                )
+        
+        # Place into a newton body_q array
+        positions = np.zeros((self.num, 7))
+        positions[:, 0] = sampled_data[:, 0]
+        positions[:, 2] = sampled_data[:, 2]
+        positions[:, 6] = 1.0
+
+        return positions
+
+
     def initial_positions(self):
         """
         Initilize positions for object being sampled

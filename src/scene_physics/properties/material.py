@@ -11,7 +11,7 @@ class Material:
         self.contact_ke = contact_ke
         self.contact_kd = contact_kd
         self.density = density
-        self.is_solid = True
+        self.is_solid = False 
 
     def to_cfg(self):
         cfg = ModelBuilder.ShapeConfig(

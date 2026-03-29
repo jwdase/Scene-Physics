@@ -233,7 +233,7 @@ class Parallel_Mesh:
         )
         verts = mesh.points.astype(np.float32)
         faces = mesh.faces.reshape(-1, 4)[:, 1:].astype(np.int32)
-        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=512)
+        return newton.Mesh(verts, faces, compute_inertia=True, is_solid=True, maxhullvert=10_000)
 
     # ------------------------------------------------------------------
     # Visualization

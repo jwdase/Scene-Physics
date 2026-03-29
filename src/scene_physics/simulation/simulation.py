@@ -17,7 +17,7 @@ SIM_SECONDS = 3
 SIM_FPS     = 40
 PYVISTA_CAMERA = [(4., 4., 4.), (0., 0., 0.), (0, 1, 0)]
 
-def run_physics_sim_target(objects, path, sim_seconds=SIM_SECONDS, sim_fps=SIM_FPS, camera=PYVISTA_CAMERA):
+def run_physics_sim_target(objects, path, sim_seconds=SIM_SECONDS, sim_fps=SIM_FPS, camera=PYVISTA_CAMERA, cam_fov=None):
     """
     Runs a visualization of a given seen and outputs
     it to output direcory
@@ -36,8 +36,8 @@ def run_physics_sim_target(objects, path, sim_seconds=SIM_SECONDS, sim_fps=SIM_F
 
     # Rendering simulation
     print("Rendering Simulation")
-    visualizer = PhysicsVideoVisualizer(objects, FPS=sim_fps, camera_pos=camera)
-    visualizer.render_final_scene(path, frames=sim_fps * sim_seconds)
+    visualizer = PhysicsVideoVisualizer(objects, FPS=sim_fps, camera_pos=camera, cam_fov = cam_fov)
+    visualizer.render_final_scene(path, frames=sim_fps * sim_seconds, dt=1/sim_fps)
 
 if __name__ == "__main__":
     pass
