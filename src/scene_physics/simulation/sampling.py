@@ -12,7 +12,7 @@ import numpy as np
 
 from scene_physics.utils.setup import build_worlds
 from scene_physics.utils.parallel_builder import allocate_worlds
-from scene_physics.likelihood.likelihoods_physics import Likelihood_Physics_Parallel
+from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
 from scene_physics.sampling.parallel_mh import ImportanceSampling
 from scene_physics.visualization.scene import PyVistaVisualizer, PhysicsVideoVisualizer
 
@@ -21,15 +21,15 @@ from scene_physics.visualization.scene import PyVistaVisualizer, PhysicsVideoVis
 DEFAULT_CAMERA = [(4., 4., 4.), (0., 0., 0.), (0, 1, 0)]
 DEFAULT_EYE = np.array([1., 1.5, 1.])
 DEFAULT_TARGET = np.array([0., 0., 0.])
-
+DEFAULT_DEGREES = 60
 
 def run_importance_sampling(
     objects,
     location,
     method="gibbs",
-    num_worlds=500,
-    iter_per_obj=50,
-    total_iterations=100,
+    num_worlds=50,
+    iter_per_obj=5,
+    total_iterations=20,
     decay="exp",
     burn_in=30,
     width=320,
@@ -37,6 +37,7 @@ def run_importance_sampling(
     max_depth=4.0,
     wp_eye=DEFAULT_EYE,
     wp_target=DEFAULT_TARGET,
+    fov_degrees=DEFAULT_DEGREES,
     pyvista_camera=DEFAULT_CAMERA,
     sim_seconds=2,
     sim_fps=40,
@@ -65,23 +66,22 @@ def run_importance_sampling(
     """
 
     os.makedirs(location, exist_ok=True)
-    experiment_name = os.path.basename(location)
-
     # Phase 1 — Build the world
     print("Building Model")
     worlds = allocate_worlds(num_worlds)
-    model, target_state = build_worlds(worlds, objects)
+    model = build_worlds(worlds, objects)
 
     # Phase 2 — Build the likelihood
     print("Building Likelihood Function")
     visualizer = PyVistaVisualizer(objects, num_worlds=num_worlds, camera_pos=pyvista_camera)
-    likelihood = Likelihood_Physics_Parallel(
-        target_state=target_state,
+    likelihood = ParallelPhysicsLikelihood(
         model=model,
+        objects=objects,
         wp_eye=wp_eye,
         wp_target=wp_target,
+        fov_degrees=fov_degrees,
         num_worlds=num_worlds,
-        name=experiment_name,
+        name=location,
         max_depth=max_depth,
         height=height,
         width=width,
@@ -102,13 +102,14 @@ def run_importance_sampling(
     elif method == "occ":
         sampler.run_occluded_sampling(iters=total_iterations, debug=debug)
     else:
-        raise AssertionError, f"Sampling method {method} does not exist"
+        raise ValueError(f"Sampling method {method} does not exist")
 
     # Results
     sampler.print_results()
     sampler.plot_proposal_scores()
     sampler.plot_proposal_stds()
     sampler.plot_avg_score()
+    sampler.plot_proposal_scatter()
 
     print("Saving .png Final Result")
     visualizer.show_final_scene(f"{location}/final_position.png")

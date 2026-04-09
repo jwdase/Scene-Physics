@@ -12,7 +12,7 @@ class Priors:
     # Sampling Params
     pos_std: float = 0.1
     rot_std: float = 0.1
-    total_iter: int = 40
+    total_iter: int = 20
 
     # bounds
     x_max: float= 1.0

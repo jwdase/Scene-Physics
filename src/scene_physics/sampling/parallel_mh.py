@@ -55,6 +55,7 @@ class ImportanceSampling:
         self.plot_interval = 5 if interval is None else interval
         self.name = name
         self.likelihoods = []
+        self.proposed_pos = {}
 
     def _get_objects(self):
         return self.objects.all_sampled
@@ -123,6 +124,9 @@ class ImportanceSampling:
 
         # Generate the proposal method, and get initial positions
         proposor = self.proposals[hash(obj)]
+        if hash(obj) not in self.proposed_pos:
+            self.proposed_pos[hash(obj)] = []
+        mem = self.proposed_pos[hash(obj)]
 
         # Move positions in the scene and get scores
         if init_positions is None:
@@ -144,6 +148,9 @@ class ImportanceSampling:
             # Get a ranking of positions and then sample
             new_positions = self._generate_positions(prev_positions, prev_scores)
             new_positions = proposor.propose_general(new_positions, iteration, count)
+            
+            # Add to memory
+            mem.append(new_positions[:, [0, 2]])
 
             # Move the object
             obj.move_6dof_wp(new_positions, self.sample_state)
@@ -170,6 +177,8 @@ class ImportanceSampling:
                 number = total_iter * object_num + iteration
                 location = f"{self.name}/epoch_{number}"
                 self._save_proposals(location, self.sample_state)
+
+            print(f"Completed Epoch: {iteration} with body: {obj}")
 
             # Save proposals and values
             self.likelihoods.append(prev_scores)
@@ -262,7 +271,7 @@ class ImportanceSampling:
         self.likelihoods.append(scores)
         self._update_all_worlds(scores)
 
-    def run_occluded_sampling(self, iters=100, debug=False)
+    def run_occluded_sampling(self, iters=100, debug=False):
         """
         Runs sampling over just occluded body positions, ASSUMES that all other
         objects are correctly placed already
@@ -276,18 +285,12 @@ class ImportanceSampling:
             if obj == oc_obj:
                 continue
             bodies[obj.allocs, 0:3] = np.array(obj.target_position)
-            bodies[obj.allocs, 3:7] = np.array(obj.target_quaternian)
+            bodies[obj.allocs, 3:7] = np.array(obj.target_quat)
 
         self.sample_state.body_q = wp.array(bodies, dtype=wp.transformf, device="cuda")
 
         # Place With Uniform Prior
-        self.run_single_body_sampling(oc_obj, 1, 0, physics=True, init_positions="unif", debug=debug)
-
-        # Run Sampling of Position
-        print("Beginning the Physics Sampling")
-        for i in range(iters):
-            self.run_single_sample(oc_obj, epoch=i, debug=debug, count=True)
-            print(f"Epoch: {i}, object: {oc_obj} ")
+        self.run_single_body_sampling(oc_obj, iters, 0, physics=True, init_positions="unif", debug=debug)
 
         # Give final positions to objects
         self._give_final_positions()
@@ -459,6 +462,58 @@ class ImportanceSampling:
         os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
         fig.savefig(f"{self.name}/avg_score.png", dpi=150)
         plt.close(fig)
+
+    def plot_proposal_scatter(self):
+        """
+        Plot X-Z scatter of all proposals for each object, colored by iteration.
+
+        For each object, self.proposed_pos[hash(obj)] is a list of (num_worlds, 2)
+        arrays collected at every iteration of run_single_body_sampling. The color
+        encodes the iteration index so early proposals appear cool and late
+        proposals appear warm, showing the temporal convergence.
+
+        Saves one figure per object to <self.name>/<obj.name>_xz_proposals.png.
+        """
+        assert len(self.proposed_pos) > 0, "No proposals recorded — run sampling first"
+
+        for obj in self.object_list:
+            key = hash(obj)
+            if key not in self.proposed_pos or len(self.proposed_pos[key]) == 0:
+                continue
+
+            # Stack into (num_iters, num_worlds, 2)
+            proposals = np.stack(self.proposed_pos[key], axis=0)
+            num_iters, num_worlds, _ = proposals.shape
+
+            # Flatten to (num_iters * num_worlds, 2) for scatter
+            xs = proposals[:, :, 0].ravel()
+            zs = proposals[:, :, 1].ravel()
+
+            # Color = iteration index, repeated for each world
+            colors = np.repeat(np.arange(num_iters), num_worlds)
+
+            fig, ax = plt.subplots(figsize=(8, 8))
+            sc = ax.scatter(
+                xs, zs, c=colors, cmap="plasma", s=8, alpha=0.5, edgecolors="none"
+            )
+            fig.colorbar(sc, ax=ax, label="Iteration")
+
+            # Mark ground-truth target if available
+            if hasattr(obj, "target_position") and obj.target_position is not None:
+                tp = np.asarray(obj.target_position)
+                ax.scatter(tp[0], tp[2], marker="*", s=200, c="lime", edgecolors="black", zorder=5, label="Target")
+                ax.legend()
+
+            ax.set_xlabel("X")
+            ax.set_ylabel("Z")
+            ax.set_title(f"X-Z proposals for {obj.name}")
+            ax.set_aspect("equal")
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+
+            os.makedirs(os.path.dirname(self.name) or ".", exist_ok=True)
+            fig.savefig(f"{self.name}/{obj.name}_xz_proposals.png", dpi=150)
+            plt.close(fig)
 
     def plot_proposal_stds(self):
         """

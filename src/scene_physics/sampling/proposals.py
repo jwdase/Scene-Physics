@@ -1,5 +1,5 @@
 """
-Generates sampling for 6DoF for each object. It uses a scheduler and applies quaternian through small angle proposed changes.
+Generates sampling for 6DoF for each object. It uses a scheduler and applies quaternion through small angle proposed changes.
 """
 
 import numpy as np
@@ -74,13 +74,14 @@ class SixDOFProposal:
                         np.random.uniform(low=self.priors.x_min, high=self.priors.x_max),
                         np.random.uniform(low=self.priors.z_min, high=self.priors.z_max),
                      )
-                 ] for _ in range(self.num)
-                )
+                  for _ in range(self.num)
+                ]
+            )
         
         # Place into a newton body_q array
         positions = np.zeros((self.num, 7))
         positions[:, 0] = sampled_data[:, 0]
-        positions[:, 2] = sampled_data[:, 2]
+        positions[:, 2] = sampled_data[:, 1]
         positions[:, 6] = 1.0
 
         return positions
@@ -129,10 +130,10 @@ class SixDOFProposal:
             positions[:, 2], a_min=self.priors.z_min, a_max=self.priors.z_max
         )
 
-        for i in range(1, self.num):
-            positions[i, 3:] = self._perturb_rotation(
-                positions[i, 3:].squeeze(), rot_std
-            )
+        # for i in range(1, self.num):
+        #    positions[i, 3:] = self._perturb_rotation(
+        #        positions[i, 3:].squeeze(), rot_std
+        #    )
 
         # Save values in object
         if count is True:

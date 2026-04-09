@@ -4,7 +4,7 @@ from scipy.spatial.transform import Rotation
 
 from newton._src.sensors.sensor_tiled_camera import SensorTiledCamera
 
-def setup_depth_camera(model, eye, target, width, height, num_worlds, fov_degrees=60):
+def setup_depth_camera(model, eye, target, width, height, num_worlds, fov_degrees):
     """Sets up the sensor tiled camera for use"""
     sensor = SensorTiledCamera(model=model, num_cameras=1, width=width, height=height)
 

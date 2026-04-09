@@ -37,14 +37,8 @@ def build_worlds(worlds, objects):
     for obj in all_objects:
         obj.give_finalized_world(model)
 
-    # Take state of correct placement
-    for obj in all_objects:
-        obj.move_to_target()
-
-    target = model.state()
-
     # Hide all objects that are not static
     for obj in objects.all_sampled:
         obj.freeze_finalized_body()
 
-    return model, target
+    return model

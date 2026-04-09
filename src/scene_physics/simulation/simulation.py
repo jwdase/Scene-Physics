@@ -8,8 +8,7 @@ and renders the result as an .mp4 video. No sampling — just a physics video.
 import os
 import numpy as np
 
-from scene_physics.properties.shapes import Parallel_Mesh, Parallel_Static_Mesh
-from scene_physics.properties.basic_materials import Dynamic_Material, Still_Material
+from scene_physics.properties.shapes import Parallel_Static_Mesh
 from scene_physics.visualization.scene import PhysicsVideoVisualizer
 
 # Defaults
