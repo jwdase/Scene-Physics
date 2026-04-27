@@ -16,6 +16,7 @@ dependencies = [
     "newton",
     "jax>=0.9.0",
     "jaxlib==0.9.0.1",
+    "usd-core>=26.3",
 ]
 
 [build-system]
@@ -31,6 +32,11 @@ dev = [
     "isort>=7.0.0,<8.0.0",
     "pytest>=8.4.2,<9.0.0",
     "jupyter>=1.1.1,<2.0.0",
+]
+
+[tool.pytest.ini_options]
+markers = [
+    "gpu: requires CUDA GPU (deselect with '-m not gpu')",
 ]
 
 # Local editable dependencies

@@ -63,19 +63,8 @@ class Object_Collection:
     def __getitem__(self, value):
         return self.objects[value]
 
-blueprint = newton.ModelBuilder(up_axis=newton.Axis.Z)
-blueprint.add_usd(scene_usd)
 
-
-# Replicate Across N Worlds
-builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
-builder.add_ground_plane()
-builder.replicate(blueprint, NUM_WORLDS, spacing=(0.0, 0.0, 0.0))
-
-model = builder.finalize()
-
-
-def object_collection(model, scene_makeup):
+def object_collection(model, scene_makeup) -> Object_Collection:
     objects = Object_Collection()
 
     for i, body_name in enumerate(model.body_key):

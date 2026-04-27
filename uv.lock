@@ -2768,6 +2768,7 @@ dependencies = [
     { name = "newton" },
     { name = "pyvista", extra = ["all"] },
     { name = "tdw" },
+    { name = "usd-core" },
 ]
 
 [package.dev-dependencies]
@@ -2786,6 +2787,7 @@ requires-dist = [
     { name = "newton", editable = "src/newton" },
     { name = "pyvista", extras = ["all"], specifier = ">=0.46.3,<0.47.0" },
     { name = "tdw", specifier = ">=1.13.0.0,<2.0.0.0" },
+    { name = "usd-core", specifier = ">=26.3" },
 ]
 
 [package.metadata.requires-dev]
@@ -3138,6 +3140,22 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c7/24/5f1b3bdffd70275f6661c76461e25f024d5a38a46f04aaca912426a2b1d3/urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed", size = 435556, upload-time = "2026-01-07T16:24:43.925Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/39/08/aaaad47bc4e9dc8c725e68f9d04865dbcb2052843ff09c97b08904852d84/urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4", size = 131584, upload-time = "2026-01-07T16:24:42.685Z" },
+]
+
+[[package]]
+name = "usd-core"
+version = "26.3"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8a/4a/1b8663cc3dfe45bfba3ef611904f34498d1ab9394c16f6322b81f0464af0/usd_core-26.3-cp311-none-macosx_10_15_universal2.whl", hash = "sha256:ede5c02f23e22d3143af7eaab326b411c858edcfc0c070d30b9d74752df28267", size = 39352085, upload-time = "2026-02-24T23:05:43.637Z" },
+    { url = "https://files.pythonhosted.org/packages/a1/ff/f46504457ef5c5b6e1691aff15aabdd92fd278f877b8e484537612237a62/usd_core-26.3-cp311-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:2317ca228cb7b3d3bbbc618cf86887188504d55b39d5305596152dad24e935fd", size = 28552867, upload-time = "2026-02-24T23:05:46.749Z" },
+    { url = "https://files.pythonhosted.org/packages/16/ad/40faa8d9b149f62ff460f629358fa107954a66d9d7ec2ee1df445ce30797/usd_core-26.3-cp311-none-win_amd64.whl", hash = "sha256:3182af84bcd1f0c8b3d7d5a44027844e8d4a1861b1af6e9329730516fd1b6a7e", size = 13358130, upload-time = "2026-02-24T23:05:49.271Z" },
+    { url = "https://files.pythonhosted.org/packages/a9/aa/817cb9873b10cc21d3666499823cee008fb62c0b832ae13ba4c771ddd758/usd_core-26.3-cp312-none-macosx_10_15_universal2.whl", hash = "sha256:23864f61b7ec9cc4ed04cc46c006190d6930f3663d6e324bd0b8b5ca85bdcc22", size = 39402081, upload-time = "2026-02-24T23:05:51.935Z" },
+    { url = "https://files.pythonhosted.org/packages/e1/90/bc0310887ce7d2d821a672ecaabb85f9c453c0f2dd180a9c27b6d4bdf963/usd_core-26.3-cp312-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:132433bb28f47f29907a41a90d36a3a7126189885088dd87d72dde9649991efa", size = 28468800, upload-time = "2026-02-24T23:05:54.731Z" },
+    { url = "https://files.pythonhosted.org/packages/34/21/e2a51a872dbf9af30dfd1a023f764c2171a453ce7327b966344b76d764ca/usd_core-26.3-cp312-none-win_amd64.whl", hash = "sha256:c436aef60e9e60e391dcd93f94565dda81137c6c91330aabed26653106cf0a35", size = 13396142, upload-time = "2026-02-24T23:05:57.545Z" },
+    { url = "https://files.pythonhosted.org/packages/05/51/003cae380540b6319b97b76404565daed917410c63a88224882a827670c7/usd_core-26.3-cp313-none-macosx_10_15_universal2.whl", hash = "sha256:8cad17c9649589b9113f1b3a03dc0497228e289c3852c4c13945ae13d7686a0e", size = 39402266, upload-time = "2026-02-24T23:06:00.343Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/75/4c4c57f544acffa77743afc5c515bbe18e50d5262f7b9b5531028e252bce/usd_core-26.3-cp313-none-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:28d7003859cd98f6d9b0349198458c81f4caad204783fbc50c648669ac2c3041", size = 28469105, upload-time = "2026-02-24T23:06:03.761Z" },
+    { url = "https://files.pythonhosted.org/packages/5d/8d/85893369128deafccabcf45006fa94e2d6c806a6332d0ac43c1af092625b/usd_core-26.3-cp313-none-win_amd64.whl", hash = "sha256:e2195e1782f7673ba31d861602df8a6444cfe8425f1f3806c03702eea5047cf0", size = 13396170, upload-time = "2026-02-24T23:06:06.31Z" },
 ]
 
 [[package]]
