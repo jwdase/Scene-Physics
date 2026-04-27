@@ -21,12 +21,15 @@ from scene_physics.properties.shapes import (
     object_collection
 )
 
+from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
+
 
 EYE = np.array([0., -1.5, 1.5])
 TARGET = np.zeros(3)
 UP = np.array([0, 0, 1]) 
 
 UP_AXIS = newton.Axis.Z # TODO switch to Y
+NUM_WORLDS = 15
 
 @dataclass
 class CameraIntrinsics:
@@ -86,8 +89,8 @@ class SingleWorldCamera(Camera):
 
 
 class MultiWorldCamera(Camera):
-    def __init__(self, intrinsics : CameraIntrinsics, model, num_worlds : int):
-        super().__init__(intrinsics, model, num_worlds=num_worlds)
+    def __init__(self, intrinsics : CameraIntrinsics, model):
+        super().__init__(intrinsics, model, num_worlds=NUM_WORLDS)
 
     def render(self, state):
         return render_point_clouds_batch(
@@ -120,12 +123,11 @@ def gen_save_point_cloud(scene_usd, intrinsics : CameraIntrinsics, save_location
     return point_cloud
 
 
-NUM_WORLDS = 16
 
 def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
     blueprint = newton
-    blueprint = newton.ModelBuilder(up_axis=newton.Axis.Z)
-    blueprint.add_usd(scene_usd)
+    blueprint = newton.ModelBuilder()
+    blueprint.add_usd(scene_usd, skip_mesh_approximation=True)
 
     # Replicate Across N Worlds
     builder = newton.ModelBuilder(up_axis=newton.Axis.Z)
@@ -148,7 +150,15 @@ def run_importance_sampling(scene_usd, intrinsics : CameraIntrinsics, scene_make
     # Step 2: Build our new world
     model, objects = build_worlds(scene_usd, scene_makeup)
 
-    return model
+    # Step 3: Create Likelihood Function
+    multiCamera = MultiWorldCamera(intrinsics, model)
+    likelihoodf = ParallelPhysicsLikelihood(multiCamera, point_cloud, model)
+
+    return model, likelihoodf
+
+
+
+
 
 default_camera = CameraIntrinsics(width=640, height=480, fov_degree=60,)
 
@@ -163,4 +173,4 @@ if __name__ == "__main__":
         hidden=['f10_apple_iphone_4'],
         )
 
-    run_importance_sampling(scene_usd, default_camera, scene_makeup, folder)
+    model, x = run_importance_sampling(scene_usd, default_camera, scene_makeup, folder)

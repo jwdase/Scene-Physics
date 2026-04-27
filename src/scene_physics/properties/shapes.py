@@ -69,7 +69,6 @@ def object_collection(model, scene_makeup) -> Object_Collection:
 
     for i, body_name in enumerate(model.body_key):
         name = body_name.split('/')[-1]
-        print(name)
 
         if name not in objects:
             assert name in scene_makeup, f"Specification did not include {name}"
