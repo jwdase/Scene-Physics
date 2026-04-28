@@ -14,7 +14,6 @@ import numpy as np
 import warp as wp
 from scipy.special import softmax
 
-from scene_physics.sampling.proposals import SixDOFProposal
 
 
 class ImportanceSampling:

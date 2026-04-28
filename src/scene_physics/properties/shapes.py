@@ -1,9 +1,10 @@
+import json
 
-import warp as wp
-import newton
 import numpy as np
 
 from dataclasses import dataclass, field
+
+from scene_physics.sampling.proposals import Proposer, Prior
 
 NUM_WORLDS = 5
 
@@ -27,8 +28,12 @@ class Scene_Makeup:
         return self.get_type(name) is not None
 
 class Body:
-    def __init__(self):
+    def __init__(self, name):
+        self.name = name
         self.allocs = []
+
+        self.proposer = None
+        self.prior = None
 
     def add(self, i):
         self.allocs.append(i)
@@ -40,10 +45,15 @@ class Body:
 class Static(Body):
     pass
 
-class Observed(Body):
+class Dynamic(Body):
+    def set_proposer(self, rand_seed, prior_dict, proposer):
+        self.prior = Prior(prior_dict)
+        self.proposer = proposer(rand_seed, self.prior)
+
+class Observed(Dynamic):
     pass
 
-class Hidden(Body):
+class Hidden(Dynamic):
     pass
 
 
@@ -53,6 +63,15 @@ class Object_Collection:
 
     def finalize(self, model):
         for obj in self.objects.values(): obj.finalize(model)
+
+    def assign_priors(self, prior_json : str,  proposer : Proposer, rng : np.random.Generator):
+        with open(prior_json, "r") as f:
+            priors = json.load(f)
+
+        children = rng.spawn(len(priors))
+
+        for i, (name, prior) in enumerate(priors.items()):
+            self[name].set_proposer(children[i], prior, proposer)
 
     def __setitem__(self, key, value):
         self.objects[key] = value
@@ -72,7 +91,7 @@ def object_collection(model, scene_makeup) -> Object_Collection:
 
         if name not in objects:
             assert name in scene_makeup, f"Specification did not include {name}"
-            objects[name] = scene_makeup.get_type(name)()
+            objects[name] = scene_makeup.get_type(name)(name)
     
         objects[name].add(i)
 

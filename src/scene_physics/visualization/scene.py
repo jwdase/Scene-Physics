@@ -1,9 +1,4 @@
-import copy
-import time
-
 import pyvista as pv
-import numpy as np
-import jax.numpy as jnp
 import newton
 import warp as wp
 from newton.solvers import SolverXPBD

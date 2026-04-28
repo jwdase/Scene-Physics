@@ -22,13 +22,13 @@ from scene_physics.properties.shapes import (
 )
 
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
-
+from scene_physics.sampling.proposals import NoDecayProposal
 
 EYE = np.array([0., -1.5, 1.5])
 TARGET = np.zeros(3)
 UP = np.array([0, 0, 1]) 
 
-UP_AXIS = newton.Axis.Z # TODO switch to Y
+UP_AXIS = newton.Axis.Z 
 NUM_WORLDS = 15
 
 @dataclass
@@ -45,6 +45,13 @@ class CameraIntrinsics:
     @property
     def fov_rad(self):
         return np.radians(self.fov_degree)
+
+
+@dataclass
+class Experiment:
+    iterations : int
+    decay_method : str
+
 
 NUM_CAMERAS = 1
 
@@ -141,8 +148,8 @@ def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
     return model, objects
 
 
-
-def run_importance_sampling(scene_usd, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str):
+def run_importance_sampling(scene_usd, prior_json, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str):
+    base_rng = np.random.default_rng(seed=42)
 
     # Get point cloud and save
     point_cloud = gen_save_point_cloud(scene_usd, intrinsics, f"{save_dir}/point_cloud.ply")
@@ -154,6 +161,17 @@ def run_importance_sampling(scene_usd, intrinsics : CameraIntrinsics, scene_make
     multiCamera = MultiWorldCamera(intrinsics, model)
     likelihoodf = ParallelPhysicsLikelihood(multiCamera, point_cloud, model)
 
+    # Step 4: Insert Priors on Shapes
+    objects.assign_priors(prior_json, NoDecayProposal, base_rng)
+
+    print("Done")
+
+    # :TODO Rewrite Smapling
+
+    # Step 5: Run Importance Sampling
+
+    
+
     return model, likelihoodf
 
 
@@ -164,8 +182,10 @@ default_camera = CameraIntrinsics(width=640, height=480, fov_degree=60,)
 
 if __name__ == "__main__":
 
-    scene_usd = "scene01_physics.usdc"
-    folder = "scene01"
+    scene_usd = "scene01/data/scene01_physics.usdc"
+    priors = "scene01/data/scene01_priors.json"
+
+    folder = "scene01/results"
 
     scene_makeup = Scene_Makeup(
         static=['dining_room_table'],
@@ -173,4 +193,4 @@ if __name__ == "__main__":
         hidden=['f10_apple_iphone_4'],
         )
 
-    model, x = run_importance_sampling(scene_usd, default_camera, scene_makeup, folder)
+    model, x = run_importance_sampling(scene_usd, priors, default_camera, scene_makeup, folder)

@@ -8,14 +8,14 @@ Scene-Physics investigates whether probabilistic models can reconstruct 3D scene
 
 ## Running Scripts
 
-All scripts are run from `src/scene_physics/` using `uv run`:
+The active workflow is driven by `simulation/sim_sampling.py`. Run from `src/scene_physics/` using `uv run`:
 
 ```bash
 cd src/scene_physics
-uv run simulation/complete_parrallel.py
+uv run simulation/sim_sampling.py
 ```
 
-Recordings are written to `src/scene_physics/recordings/<experiment_name>/` relative to CWD. Object mesh files are resolved from `src/scene_physics/objects/` via `__file__`-relative paths in each script, so CWD does not affect mesh loading.
+Scenes are loaded from `simulation/scene01/data/*.usdc`. Priors are loaded from `simulation/scene01/data/scene01_priors.json`. Outputs (rendered point clouds, etc.) are written under `simulation/scene01/results/` — that directory must exist before running.
 
 Dev tooling (run from project root):
 ```bash
@@ -26,176 +26,156 @@ uv run pytest
 
 ## Canonical Script Structure
 
-`simulation/complete_parrallel.py` is the canonical example. Every script follows this 3-phase pattern:
+`simulation/sim_sampling.py::run_importance_sampling` is the canonical entry point. It runs five phases:
 
-**Phase 1 — Build the world**
+**Step 1 — Render the ground-truth point cloud**
 ```python
-worlds = allocate_worlds(NUM_WORLDS)       # N isolated physics worlds + shared ground
-obj = make_scene01_world()                 # returns {"observed": [...], "static": [...], "unobserved": [...]}
-model, target_state = build_worlds(worlds, obj)
+point_cloud = gen_save_point_cloud(scene_usd, intrinsics, f"{save_dir}/point_cloud.ply")
+```
+Loads the USD scene into a single-world `ModelBuilder`, runs the camera once, saves the cloud as `.ply`.
+
+**Step 2 — Build the parallel worlds**
+```python
+model, objects = build_worlds(scene_usd, scene_makeup)
+```
+Loads the USD into a "blueprint" `ModelBuilder`, then `replicate`s it `NUM_WORLDS` times into the real builder (with a shared ground plane, Z-up). Returns the finalized `model` and an `Object_Collection` whose `Body` entries track per-world body indices via `allocs`.
+
+**Step 3 — Build the likelihood**
+```python
+multi_camera = MultiWorldCamera(intrinsics, model)
+likelihood   = ParallelPhysicsLikelihood(multi_camera, point_cloud, model)
+```
+The camera owns the `SensorTiledCamera`, ray buffer, and per-world `camera_transforms`. The likelihood owns the XPBD solver + reusable state buffers and a baseline score.
+
+**Step 4 — Insert priors on the dynamic objects**
+```python
+objects.assign_priors(prior_json, NoDecayProposal, base_rng)
+```
+Reads per-object priors from JSON and constructs a `Proposer` (e.g. `NoDecayProposal`) on each `Dynamic` body. Static bodies are skipped.
+
+**Step 5 — Run importance sampling**
+Currently empty; the proposer/objects/model/likelihood are wired up but the loop is not yet ported into the new workflow.
+
+## Object Taxonomy (`properties/shapes.py`)
+
+`Scene_Makeup` partitions named objects into three roles:
+
+| Class | Role |
+|-------|------|
+| `Static`   | Kinematic; no proposer assigned |
+| `Observed` | Dynamic; visible in the GT render |
+| `Hidden`   | Dynamic; not directly visible, sampled via physics |
+
+`Object_Collection` is a dict-like container of `Body` instances. Each `Body` carries `name`, `allocs` (numpy array of body indices across replicated worlds), and — for `Dynamic` bodies — a `prior` and `proposer` after `assign_priors` runs.
+
+`object_collection(model, scene_makeup)` walks `model.body_key`, takes `name = body_name.split('/')[-1]`, and asserts the name is in `scene_makeup`. **Caveat:** `add_ground_plane()` in `build_worlds` may add a ground body whose key is not in `scene_makeup` and will trip the assert. If you hit this, either skip non-makeup names in the loop or include the ground key in `Scene_Makeup.static`.
+
+## Priors (`scene01/data/scene01_priors.json`)
+
+Per-object priors are loaded from JSON. Each entry has the shape:
+
+```json
+{
+  "f10_apple_iphone_4": {
+    "position": [x, y, z, qx, qy, qz, qw],
+    "pos_std":  0.1,
+    "rot_std":  0.1,
+    "x_max":  0.5, "x_min": -0.5,
+    "y_max":  0.5, "y_min": -0.5
+  }
+}
 ```
 
-**Phase 2 — Build the likelihood**
-```python
-likelihood = Likelihood_Physics_Parallel(target_state=target_state, model=model, num_worlds=NUM_WORLDS, ...)
-```
+`sampling/proposals.py::Prior.__init__` parses this dict. Only objects listed in the JSON receive a proposer; unlisted ones (e.g. statics) are skipped.
 
-**Phase 3 — Build and run the sampler**
-```python
-sampler = ImportanceSampling(model, likelihood, obj, ...)
-sampler.run_sampling_linear_print()   # or run_sampling_gibbs()
-sampler.print_results()
-```
+## Proposer (`sampling/proposals.py`)
 
-## Object Taxonomy
+- `Proposer(rand_seed, prior)` — base class. Holds `self.rng`, `self._cur_pos_std`, `self._cur_rot_std`. Subclasses implement `_update_pos_std` / `_update_rot_std` for scheduling.
+- `NoDecayProposal(Proposer)` — fixed std (no decay).
+- `initial_proposal(num_worlds)` → `(num_worlds, 7)` body_q rows. Row 0 is the prior's mean transform; rows `[1:]` add Gaussian position noise and an axis-angle rotation perturbation. Bounds clipped via `_apply_bounds`.
+- `propose(positions, likelihood)` → `(n, 7)` particle-filter resample. Row 0 keeps the argmax; rows `[1:]` are sampled from `positions` weighted by `likelihood`, then perturbed.
 
-Every scene function returns a dict with three keys:
+`_apply_bounds` clips the X and Y columns to `prior.x_min/max`, `prior.y_min/max`. This is the table-top plane (Z is height in the Z-up convention).
 
-| Key | Type | Role |
-|-----|------|------|
-| `"observed"` | `list[Parallel_Mesh]` | Dynamic objects whose positions are sampled (visible in GT render) |
-| `"unobserved"` | `list[Parallel_Mesh]` | Dynamic objects sampled using physics (not directly visible) |
-| `"static"` | `list[Parallel_Static_Mesh]` | Kinematic objects shared across all worlds (table, floor accessories) |
+## Likelihood (`likelihood/likelihoods.py`)
 
-## World Building Pipeline (`build_worlds`)
+`ParallelPhysicsLikelihood(camera, target_point_cloud, model, ...)` exposes two scoring modes:
 
-Order matters for `allocs` tracking:
-1. Insert static objects once (`world=-1`, shared globally)
-2. For each world index: insert all observed dynamic objects, then all unobserved
-3. `worlds.finalize()` → call `give_finalized_world(model)` on all objects (sets `obj.allocs` as numpy array and `obj.num_worlds`)
-4. Call `move_to_target()` on all objects (sets world-0 to ground-truth position)
-5. Capture `target = model.state()` — this is the ground-truth observation
-6. Call `freeze_finalized_body()` on dynamic objects (zeros inv_mass/inv_inertia, moves to `OFF_POSITION=(0,-1000,0)`)
+- `still(scene)` — render `scene` once, return `(num_worlds,)` scores − `baseline_score`.
+- `physics(scene)` — forward-sim `frames` steps of XPBD with `substeps` per frame; snapshot `body_q` every `eval_every` frames; replay each snapshot through the camera; return `(num_worlds,)` averaged scores − `baseline_score`.
 
-`build_worlds` returns `(model, target_state)` — two values only.
+`baseline_score` is `compute_likelihood_score(target, target)` (self-comparison), so the returned scores are *deltas* from the perfect match.
 
-## Priors (`properties/priors.py`)
+## Camera (`simulation/sim_sampling.py`)
 
-Each `Parallel_Mesh` carries a `Priors` dataclass (defaults shown):
+`SingleWorldCamera` and `MultiWorldCamera` both extend a base `Camera`. Both wrap `SensorTiledCamera` and build a `(1, num_worlds)` `camera_transforms` so every parallel world uses the same viewpoint.
 
-```python
-@dataclass
-class Priors:
-    init_mean: float = 0.0    # initial position mean
-    init_std:  float = 0.01   # initial position std
-    pos_std:   float = 0.1    # per-step position noise
-    rot_std:   float = 0.1    # per-step rotation noise (radians)
-    total_iter: int  = 40     # expected iterations (used by scheduler)
-    x_min: float = -1.0       # XZ bounding box for proposals
-    x_max: float =  1.0
-    z_min: float = -1.0
-    z_max: float =  1.0
-```
-
-Pass per-object priors at construction: `Parallel_Mesh(..., priors=Priors(pos_std=0.05))`.
-`obj.set_proposal()` returns `(priors, num_worlds)` — used internally by `ImportanceSampling._gen_proposals`.
+`CameraIntrinsics(width, height, fov_degree, max_depth, eye, target, up)` is a dataclass; defaults are Z-up with `eye=(0, -1.5, 1.5)`, `target=(0,0,0)`, `up=(0,0,1)`.
 
 ## Key Conventions
 
-- **Quaternions**: XYZW ordering throughout (`[qx, qy, qz, qw]`). `body_q` shape is `[N_bodies, 7]` = `[x, y, z, qx, qy, qz, qw]`.
-- **Static bodies**: `density=0.0` (`Still_Material`) makes Newton treat a body as kinematic.
-- **GPU transfers**: always use `jnp.from_dlpack(warp_array)` — never `.numpy()` then back to JAX.
-- **Pixel indices**: `_get_pixel_indices` in `likelihoods.py` must return **numpy arrays** (not jnp) to avoid JAX tracer leaks across JIT compilations.
-- **Recordings**: written relative to CWD — always run from `src/scene_physics/`.
-
-## Likelihood Functions
-
-`Likelihood_Physics_Parallel` in `likelihood/likelihoods_physics.py`:
-
-- `new_proposal_likelihood_still_batch(scene)` — batch render current positions, no physics. Returns `(num_worlds,)` numpy array of scores relative to baseline.
-- `new_proposal_likelihood_physics_batch(scene)` — run XPBD forward sim for `frames` steps, save CPU snapshots every `eval_every` frames, batch render + average. Slower but accounts for physical plausibility.
-
-Both subtract `self.baseline_score` (self-comparison of the target point cloud). The physics eval stores body_q snapshots as numpy arrays and replays them via a single reusable `_render_state`.
-
-Camera setup: `setup_depth_camera(model, eye, target, width, height, num_worlds)` — note `num_worlds` is required. It builds a `(1, num_worlds)` `camera_transforms` array so every parallel world uses the same viewpoint correctly.
-
-## Sampler (`sampling/parallel_mh.py`)
-
-The sampler class is `ImportanceSampling`. Two run modes:
-
-**`run_sampling_linear_print(debug=False)`** — sequential placement:
-1. For each observed object: `run_single_body_sampling(obj, iter_per_obj, physics=False)`
-2. For each unobserved object: `run_single_body_sampling(obj, iter_per_obj, physics=True)`
-3. Calls `_give_final_positions()` at the end
-
-**`run_sampling_gibbs(iters, debug, burn_in)`** — Gibbs sampling:
-1. Burn-in: `run_single_body_sampling` for each object (no physics, `count=False`)
-2. Loop: randomly choose an object, call `run_single_sample` (physics, `count=True`)
-3. Calls `_give_final_positions()` at the end
-
-### `run_single_body_sampling` inner loop
-
-```
-initial_positions()  →  (num_worlds, 7) near init_mean ± init_std, Y ≥ 0
-move_6dof_wp → score
-for each iteration:
-    _generate_positions(positions, scores)  →  softmax resample, top world pinned at [0]
-    propose_general(positions, epoch, count)  →  add Gaussian noise, clip to XZ bounds
-    move_6dof_wp → score
-    _update_all_worlds(scores)              →  particle-filter resample across all objects
-_give_final_positions()                     →  one final physics pass, pick top world
-```
-
-### Key internal methods
-
-- **`_generate_positions(position, scores)`**: computes `softmax(scores)`, pins the top world at index 0, resamples the rest with replacement — so the best candidate is always preserved.
-- **`_update_all_worlds(scores)`**: after each iteration, resamples all objects' body_q rows together using the same softmax-weighted indices, keeping the worlds coherent across objects.
-- **`_give_final_positions()`**: runs `new_proposal_likelihood_physics_batch` once to get final scores, finds `top_world = argmax(scores)`, calls `obj.place_final_position(top_world, sample_state)` for every object.
-
-## Proposal (`sampling/proposals.py`)
-
-`SixDOFProposal(priors, num_worlds, seed, schedule="no_decay")`:
-
-- `initial_positions()` → `(num_worlds, 7)` from `Normal(init_mean, init_std)`, `Y = abs(Y)`, identity quaternion.
-- `propose_general(positions, epoch_num, count)` → adds noise to rows `[1:]` (row 0 is the pinned best), clips X and Z to bounds, perturbs rotation via axis-angle. If `count=True`, records `pos_std/rot_std` for plotting.
-- `get_std()` → applies the schedule to `priors.pos_std` / `priors.rot_std` using `self.cur_iters` and `priors.total_iter`.
-
-Available schedules (passed as string): `"no_decay"`, `"linear"`, `"exp"`.
+- **Up axis**: Z-up. `eye=(0, -1.5, 1.5)` looks from −Y at the origin. The table top is the XY plane; objects sit at `z ≈ 0.75`.
+- **Quaternions**: XYZW ordering. `body_q` rows are `[x, y, z, qx, qy, qz, qw]`.
+- **Static bodies**: `density=0.0` (`Still_Material`) makes Newton treat the body as kinematic.
+- **GPU transfers**: use `jnp.from_dlpack(warp_array)` — never `.numpy()` then back to JAX.
+- **Working directory**: always run from `src/scene_physics/`. Relative paths in `__main__` (e.g. `scene01/data/...`) resolve from there.
 
 ## Architecture Diagram
 
 ```
-allocate_worlds(N)
-    └── ModelBuilder with N isolated collision worlds + shared ground
-         │
-         ├── Parallel_Static_Mesh.insert_object_static()  (world=-1, once)
-         └── Parallel_Mesh.insert_object(world=i)         (once per world)
-              │
-              └── worlds.finalize() → Newton Model
-                   │
-                   ├── give_finalized_world(model)  → obj.allocs, obj.num_worlds
-                   ├── move_to_target()             → world-0 = ground truth
-                   ├── model.state()                → target_state
-                   └── freeze_finalized_body()      → dynamic objects hidden
+gen_point_cloud(scene_usd)            # single-world ground-truth render
+    └── ModelBuilder + add_ground_plane + add_usd
+    └── SingleWorldCamera.render → (H,W,3) point cloud → save .ply
 
-Likelihood_Physics_Parallel(target_state, model, num_worlds)
-    └── setup_depth_camera(..., num_worlds)  → camera_transforms (1, num_worlds)
-    └── renders target_state world-0 → correct_pointcloud (H,W,3)
-    └── baseline_score = compute_likelihood_score(correct, correct)
+build_worlds(scene_usd, scene_makeup)
+    ├── blueprint = ModelBuilder().add_usd(...)
+    └── builder.replicate(blueprint, NUM_WORLDS, spacing=0)
+         └── model = builder.finalize()
+         └── object_collection(model, scene_makeup)
+              └── walks model.body_key, dispatches Static/Observed/Hidden
 
-ImportanceSampling.run_sampling_linear_print()
-    └── for each observed obj:   run_single_body_sampling(physics=False)
-    └── for each unobserved obj: run_single_body_sampling(physics=True)
-         └── initial_positions() → (num_worlds, 7)
-         └── _generate_positions + propose_general → new (num_worlds, 7)
-         └── obj.move_6dof_wp(proposals, sample_state)
-         └── likelihood_batch(sample_state) → (num_worlds,) scores
-         └── _update_all_worlds(scores) → resample body_q across all objects
-    └── _give_final_positions() → obj.place_final_position(top_world, sample_state)
+ParallelPhysicsLikelihood(MultiWorldCamera, target_pc, model)
+    ├── SolverXPBD + state buffers + render_state
+    └── baseline_score = score(target, target)
+
+Object_Collection.assign_priors(prior_json, NoDecayProposal, rng)
+    └── for each name in JSON:
+         └── Dynamic.set_proposer(child_rng, prior_dict, NoDecayProposal)
+              ├── self.prior    = Prior(prior_dict)
+              └── self.proposer = NoDecayProposal(child_rng, self.prior)
 ```
+
+---
+
+## Legacy Code
+
+The following files are **legacy** under the new workflow and are not on the active path. They reference symbols that no longer exist (`Parallel_Mesh`, `Parallel_Static_Mesh`, `SixDOFProposal`, `allocate_worlds`, `build_worlds` from `utils/setup.py`) and will not import as-is. Either rewrite against the new API or archive:
+
+- `sampling/parallel_mh.py` — old `ImportanceSampling` class with `run_sampling_linear_print` / `run_sampling_gibbs`. References undefined `SixDOFProposal`. The new sampling loop has not yet been ported here.
+- `simulation/sampling.py` — uses old `allocate_worlds` / `build_worlds`.
+- `simulation/simulation.py` — older single-script entry point.
+- `utils/setup.py` — `build_worlds(worlds, objects)` over the old object taxonomy.
+- `utils/parallel_builder.py` — `allocate_worlds`.
+- `visualization/scene.py` — pyvista-based viewer using `Parallel_Mesh` types.
+
+Don't import these from new code. The `scene_physics.sampling` package's `__init__.py` only re-exports `ImportanceSampling`; instantiating it currently fails because of the missing `SixDOFProposal`.
 
 ---
 
 ## Known Issues / Next Steps
 
 **Still open**
-- `init_positions` path in `run_single_body_sampling` raises `NotImplementedError` — needed for warm-starting.
-- No convergence criterion — always runs for exactly `total_iter` / `iters` iterations.
-- `Parallel_Mesh.unfreeze_finalized_body` places bodies at random normal positions — may overlap other objects. Should respect `Priors` bounds.
-- No tests despite `pytest` being a dev dependency. At minimum: likelihood shape, proposal shape, `build_worlds` smoke test.
-- `simulation/mh.py` (`XZ_MH_Sampler`, `XZ_Physics_MH_Sampler`) is legacy single-object 2D sampling — consider archiving.
-- Scene design: all target positions currently at `(0,0,0)` — objects overlap, weakening the likelihood gradient. Should use distinct non-overlapping target positions.
+- **Step 5 unimplemented** — `run_importance_sampling` ends after `assign_priors`; the actual sampling loop (call `proposer.initial_proposal`, score with `likelihood.still` / `likelihood.physics`, resample with `proposer.propose`) is not yet wired up.
+- **Ground-plane assertion** — `object_collection` may assert on a ground body name that isn't in `Scene_Makeup`. Confirm by printing `model.body_key` after `build_worlds`.
+- **Coordinate convention in `_apply_bounds`** — clips X and Y, which is correct for Z-up table-top. Confirm priors `y_max/min` match the actual Y extent of the table.
+- **No convergence criterion** — the planned loop will need an iteration cap or a stop rule.
+- **No tests** despite `pytest` being a dev dependency. Minimum target: prior JSON parse, `Object_Collection.assign_priors` smoke test, likelihood shape, proposer shape.
+- **Output directory** — `gen_save_point_cloud` writes to `{save_dir}/point_cloud.ply` and will raise `FileNotFoundError` if the parent doesn't exist. Either create it in the script or document it in the run instructions.
 
 **Recently fixed**
-- `camera_transforms` was `(1,1)` — caused garbage point clouds for all worlds except world 0. Fixed: now `(1, num_worlds)`.
-- `np.clip` missing `a_max` in `propose_general` — fixed to `np.clip(..., 0.0, None)`.
+- `sampling/__init__.py` — removed broken `from .proposals import SixDOFProposal` re-export.
+- `properties/shapes.py` — typed `rng` as `np.random.Generator` (was `np.Generator`).
+- `proposals.py::Prior` — `pos_y/z` and `quat_x/y/z/w` now indexed correctly.
+- `proposals.py::Proposer.initial_proposal` — uses `np.tile` (was `np.repeat`, which flattened).
+- `proposals.py::Proposer.propose` — `self.rng.choice` resamples row indices then gathers, instead of flattening the 2-D array.
+- Unused imports cleaned across `material.py`, `kernels/image_process.py`, `visualization/scene.py`, `proposals.py`, `shapes.py`.

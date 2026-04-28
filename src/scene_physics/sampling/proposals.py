@@ -4,9 +4,6 @@ Generates sampling for 6DoF for each object. It uses a scheduler and applies qua
 
 import numpy as np
 from scipy.spatial.transform import Rotation
-from scipy.special import softmax
-
-from scene_physics.properties.priors import Priors
 
 
 def linear_decay(iteration, total_iterations):
@@ -19,149 +16,103 @@ def exponential_decay(iteration, half_life=50):
     return max(0.1, np.exp(-0.693 * iteration / half_life))
 
 
-def no_decay(iteration, half_life):
-    return 1.0
+class Prior:
+    def __init__(self, json : dict):
+        self.pos_x = json["position"][0]
+        self.pos_y = json["position"][1]
+        self.pos_z = json["position"][2]
 
+        self.quat_x = json["position"][3]
+        self.quat_y = json["position"][4]
+        self.quat_z = json["position"][5]
+        self.quat_w = json["position"][6]
 
-class SixDOFProposal:
-    """"""
+        self.init_std_pos = json["pos_std"]
+        self.init_std_rot = json["rot_std"]
 
-    schedules = {"linear": linear_decay, "exp": exponential_decay, "no_decay": no_decay}
+        self.x_max = json["x_max"]
+        self.x_min = json["x_min"]
+        self.y_max = json["y_max"]
+        self.y_min = json["y_min"]
 
-    def __init__(self, priors, num_worlds, seed, schedule="no_decay"):
-        assert isinstance(priors, Priors), "Expecting object priors passed in"
-
-        # Values for sampling
-        self.num = num_worlds
-        self.priors = priors
-
-        # TODO Random Seed
-
-        # Our schedulers
-        self.schedulers = self._get_scheduler(schedule)
-        self.cur_iters = 0
-
-        # Saves values for rot_std and pos_std
-        self.save_rot_std = []
-        self.save_pos_std = []
-        self.epoch_num = []
-
-    def _get_scheduler(self, schedule_type):
-        """Choooses our schedulers for 6DoF"""
-
-        assert schedule_type in list(
-            self.schedules.keys()
-        ), "Scheduler {schedule_type} is not an option"
-        return self.schedules[schedule_type]
-
-    def get_std(self):
-        """Get current (pos_std, rot_std) after applying schedule."""
-
-        scale = self.schedulers(self.cur_iters, self.priors.total_iter)
-        return self.priors.pos_std * scale, self.priors.rot_std * scale
-
-
-    def uniform_prior(self):
-        """
-        Initilize positions for object being samples with a 
-        complete uniform_prior - Sample only over (x, z) values
-        """
-
-        # ASSUMING CORRECT ROTATION: (0, 0, 0, 1) AND POS = (0, 0, 0)
-        sampled_data = np.array(
-                [
-                    (
-                        np.random.uniform(low=self.priors.x_min, high=self.priors.x_max),
-                        np.random.uniform(low=self.priors.z_min, high=self.priors.z_max),
-                     )
-                  for _ in range(self.num)
+    @property
+    def xform(self):
+        return [
+                self.pos_x, self.pos_y, self.pos_z,
+                self.quat_x, self.quat_y, self.quat_z,
+                self.quat_w
                 ]
-            )
+
+class Proposer:
+    """
+    Proposer Class must be able to generate initial proposals
+    and proposals after initial values
+    """
+    def __init__(self, rand_seed, prior : Prior):
+        self.rng = np.random.default_rng(rand_seed)
+        self.prior = prior
         
-        # Place into a newton body_q array
-        positions = np.zeros((self.num, 7))
-        positions[:, 0] = sampled_data[:, 0]
-        positions[:, 2] = sampled_data[:, 1]
-        positions[:, 6] = 1.0
+        self._cur_pos_std = prior.init_std_pos
+        self._cur_rot_std = prior.init_std_rot
 
-        return positions
+    def _gen_rotations(self, quat : np.array):
+        n, _ = quat.shape
+        angles = self.rng.normal(0.0, self._cur_rot_std, size=(n, 3))
 
+        perturbation = Rotation.from_rotvec(angles)
+        current = Rotation.from_quat(quat)
 
-    def initial_positions(self):
-        """
-        Initilize positions for object being sampled
+        return (perturbation * current).as_quat()
 
-        - Positions are on Gaussian
-        - Quaternian is vertical for right now
-        """
+    def _update(self):
+        self._update_pos_std()
+        self._update_rot_std()
 
-        positions = np.zeros((self.num, 7))
-        positions[:, :3] = np.random.normal(
-            loc=self.priors.init_mean, scale=self.priors.init_std, size=(self.num, 3)
-        )
+    def _update_pos_std(self):
+        raise NotImplementedError("Not Implemented in General Class")
 
-        # Ensure Y axis > 0, place vertical
-        positions[:, 1] = np.abs(positions[:, 1])
-        positions[:, 6] = 1.0
+    def _update_rot_std(self):
+        raise NotImplementedError("Not Implemented in General Class")
 
-        return positions
+    def _apply_bounds(self, proposals):
+        proposals[:, 0] = np.clip(proposals[:, 0], a_min=self.prior.x_min, a_max=self.prior.x_max)
+        proposals[:, 1] = np.clip(proposals[:, 1], a_min=self.prior.y_min, a_max=self.prior.y_max)
+        return proposals
 
-    def _update_epochs(self, pos_std, rot_std, epoch_num):
-        """Saves values for epoch in plotting"""
+    def initial_proposal(self, num_worlds : int):
+        np_xform = np.array(self.prior.xform)
+        proposals = np.tile(np_xform, (num_worlds, 1))
 
-        self.save_pos_std.append(pos_std)
-        self.save_rot_std.append(rot_std)
-        self.epoch_num.append(epoch_num)
+        proposals[1:, :3] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(num_worlds - 1, 3))
+        proposals[1:, 3:] = self._gen_rotations(proposals[1:, 3:])
+        
+        self._update()
 
-    def propose_general(self, positions, epoch_num, count):
-        """
-        Add some noise to positions - does not add noise to index=0 where top
-        index from previous run is stored.
-        """
+        return self._apply_bounds(proposals)
 
-        pos_std, rot_std = self.get_std()
-        positions[1:, :3] = positions[1:, :3] + np.random.normal(
-            0, pos_std, size=(self.num - 1, 3)
-        )
-        positions[:, 0] = np.clip(
-            positions[:, 0], a_min=self.priors.x_min, a_max=self.priors.x_max
-        )
-        positions[:, 2] = np.clip(
-            positions[:, 2], a_min=self.priors.z_min, a_max=self.priors.z_max
-        )
+    def propose(self, positions, likelihood):
+        n = len(likelihood)
+        proposals = np.zeros((n, 7))
 
-        # for i in range(1, self.num):
-        #    positions[i, 3:] = self._perturb_rotation(
-        #        positions[i, 3:].squeeze(), rot_std
-        #    )
+        # Keep Top Likelihood
+        proposals[0, :] = positions[np.argmax(likelihood)]
+        
+        weights = likelihood / np.sum(likelihood)
+        idx = self.rng.choice(n, size=n-1, p=weights, replace=True)
+        proposals[1:, :] = positions[idx]
 
-        # Save values in object
-        if count is True:
-            self._update_epochs(pos_std, rot_std, epoch_num)
+        # Add Gaussian Noise
+        proposals[1:, :3] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(n - 1, 3))
+        proposals[1:, 3:] = self._gen_rotations(proposals[1:, 3:])
 
-        # Update Iterations
-        self.cur_iters += 1
+        self._update()
 
-        return positions
+        return self._apply_bounds(proposals)
 
-    @staticmethod
-    def _perturb_rotation(current_quat, rot_std):
-        """Apply a small random rotation perturbation to a quaternion.
+class NoDecayProposal(Proposer):
+    def _update_pos_std(self):
+        pass
+    
+    def _update_rot_std(self):
+        pass
 
-        Args:
-            current_quat: (4,) array in (qx, qy, qz, qw) format
-            rot_std: standard deviation of axis-angle perturbation (radians)
-
-        Returns:
-            (4,) numpy array in (qx, qy, qz, qw) format, unit normalized
-        """
-        # Sample small axis-angle perturbation
-        axis_angle = np.random.normal(0, rot_std, size=3)
-        perturbation = Rotation.from_rotvec(axis_angle)
-
-        # Compose with current rotation
-        current_rot = Rotation.from_quat(np.asarray(current_quat))
-        new_rot = perturbation * current_rot
-
-        # Return as (qx, qy, qz, qw) — scipy default
-        return new_rot.as_quat()

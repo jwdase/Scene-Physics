@@ -1,5 +1,4 @@
 import warp as wp
-import jax
 import jax.numpy as jnp
 
 @wp.kernel(enable_backward=False)
