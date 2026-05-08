@@ -70,8 +70,8 @@ def run_simulation(scene_usd, output_path):
 
 
 if __name__ == "__main__":
-    scene_usd = "scene01_physics.usdc"
-    output_path = "scene01_recording.usdc"
+    scene_usd = "scene01/data/scene01_physics.usdc"
+    output_path = "scene01/data/scene01_recording.usdc"
 
     run_simulation(scene_usd, output_path)
 

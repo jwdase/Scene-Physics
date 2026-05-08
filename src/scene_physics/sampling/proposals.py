@@ -48,10 +48,11 @@ class Proposer:
     Proposer Class must be able to generate initial proposals
     and proposals after initial values
     """
-    def __init__(self, rand_seed, prior : Prior):
+    def __init__(self, rand_seed, num_worlds, prior : Prior):
         self.rng = np.random.default_rng(rand_seed)
         self.prior = prior
-        
+        self.num_worlds = num_worlds
+
         self._cur_pos_std = prior.init_std_pos
         self._cur_rot_std = prior.init_std_rot
 
@@ -79,11 +80,11 @@ class Proposer:
         proposals[:, 1] = np.clip(proposals[:, 1], a_min=self.prior.y_min, a_max=self.prior.y_max)
         return proposals
 
-    def initial_proposal(self, num_worlds : int):
+    def initial_proposal(self):
         np_xform = np.array(self.prior.xform)
-        proposals = np.tile(np_xform, (num_worlds, 1))
+        proposals = np.tile(np_xform, (self.num_worlds, 1))
 
-        proposals[1:, :3] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(num_worlds - 1, 3))
+        proposals[1:, :3] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(self.num_worlds - 1, 3))
         proposals[1:, 3:] = self._gen_rotations(proposals[1:, 3:])
         
         self._update()
@@ -91,18 +92,19 @@ class Proposer:
         return self._apply_bounds(proposals)
 
     def propose(self, positions, likelihood):
-        n = len(likelihood)
-        proposals = np.zeros((n, 7))
+        proposals = np.zeros((self.num_worlds, 7))
 
-        # Keep Top Likelihood
+        # Keep Top Likelihood - Go into allocs to find top for that object
         proposals[0, :] = positions[np.argmax(likelihood)]
         
-        weights = likelihood / np.sum(likelihood)
-        idx = self.rng.choice(n, size=n-1, p=weights, replace=True)
+        ranks = np.argsort(np.argsort(likelihood)) + 1  # 1-based so worst != 0
+        weights = ranks / ranks.sum()
+
+        idx = self.rng.choice(self.num_worlds, size=self.num_worlds-1, p=weights, replace=True)
         proposals[1:, :] = positions[idx]
 
         # Add Gaussian Noise
-        proposals[1:, :3] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(n - 1, 3))
+        proposals[1:, :3] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(self.num_worlds - 1, 3))
         proposals[1:, 3:] = self._gen_rotations(proposals[1:, 3:])
 
         self._update()

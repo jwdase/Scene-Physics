@@ -23,6 +23,7 @@ from scene_physics.properties.shapes import (
 
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
 from scene_physics.sampling.proposals import NoDecayProposal
+from scene_physics.sampling.importance import ImportanceSampler
 
 EYE = np.array([0., -1.5, 1.5])
 TARGET = np.zeros(3)
@@ -144,11 +145,11 @@ def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
     model = builder.finalize()
 
     # Create Object Collection and Return
-    objects = object_collection(model, scene_makeup)
+    objects = object_collection(model, scene_makeup, NUM_WORLDS)
     return model, objects
 
 
-def run_importance_sampling(scene_usd, prior_json, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str):
+def run_importance_sampling(scene_usd, prior_json, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str, iterations=20):
     base_rng = np.random.default_rng(seed=42)
 
     # Get point cloud and save
@@ -164,15 +165,21 @@ def run_importance_sampling(scene_usd, prior_json, intrinsics : CameraIntrinsics
     # Step 4: Insert Priors on Shapes
     objects.assign_priors(prior_json, NoDecayProposal, base_rng)
 
-    print("Done")
-
-    # :TODO Rewrite Smapling
+    # Step 5: Initialize Importance Sampler
+    scene = model.state()
+    sampler = ImportanceSampler(objects, likelihoodf, scene)
 
     # Step 5: Run Importance Sampling
+    sampler.initialize()
+    sampler.gibb_sample(iterations=iterations)
+
+    # Step 6: Generate Plots
+    sampler.gen_plots(save_dir)
+    objects.gen_plots(save_dir)
 
     
 
-    return model, likelihoodf
+    return scene, model, likelihoodf
 
 
 
@@ -193,4 +200,4 @@ if __name__ == "__main__":
         hidden=['f10_apple_iphone_4'],
         )
 
-    model, x = run_importance_sampling(scene_usd, priors, default_camera, scene_makeup, folder)
+    scene, model, x = run_importance_sampling(scene_usd, priors, default_camera, scene_makeup, folder, 10)
