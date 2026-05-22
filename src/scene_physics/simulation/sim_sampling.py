@@ -1,3 +1,4 @@
+import json
 import os       
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
@@ -5,6 +6,7 @@ import newton
 import warp as wp
 import jax 
 import jax.numpy as jnp
+import matplotlib.pyplot as plt
 
 from newton._src.sensors.sensor_tiled_camera import SensorTiledCamera
 from scene_physics.visualization.camera import look_at_transform
@@ -107,6 +109,26 @@ class MultiWorldCamera(Camera):
             self.intrinsics.height, self.intrinsics.width, self.intrinsics.max_depth,
             self.num_worlds,
         )
+    
+def plot_target_scene(truth_json : str, save_dir : str):
+    with open(truth_json, 'r') as f:
+        truth = json.load(f)
+
+    labels = list(truth.keys())
+    positions = [truth[obj][:3] for obj in labels]
+
+    plt.figure(figsize=(8, 6))
+
+    for lab, pos in zip(labels, positions):
+        plt.scatter([pos[0]], [pos[1]], label=lab)
+
+
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.title("Target Scene")
+    plt.legend()
+    plt.savefig(f"{save_dir}/target_scene.png")
+    plt.close()
 
 def gen_point_cloud(scene_usd, intrinsics : CameraIntrinsics) -> jax.Array:
     # Build the scene
@@ -131,7 +153,6 @@ def gen_save_point_cloud(scene_usd, intrinsics : CameraIntrinsics, save_location
     return point_cloud
 
 
-
 def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
     blueprint = newton
     blueprint = newton.ModelBuilder()
@@ -149,8 +170,11 @@ def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
     return model, objects
 
 
-def run_importance_sampling(scene_usd, prior_json, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str, iterations=20):
+def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str, iterations=20):
     base_rng = np.random.default_rng(seed=42)
+
+    # Step 0: Plot Target Scene
+    plot_target_scene(truth_json, save_dir)
 
     # Get point cloud and save
     point_cloud = gen_save_point_cloud(scene_usd, intrinsics, f"{save_dir}/point_cloud.ply")
@@ -191,6 +215,7 @@ if __name__ == "__main__":
 
     scene_usd = "scene01/data/scene01_physics.usdc"
     priors = "scene01/data/scene01_priors.json"
+    truth_json = "scene01/data/scene01_truth.json"
 
     folder = "scene01/results"
 
@@ -200,4 +225,4 @@ if __name__ == "__main__":
         hidden=['f10_apple_iphone_4'],
         )
 
-    scene, model, x = run_importance_sampling(scene_usd, priors, default_camera, scene_makeup, folder, 10)
+    scene, model, x = run_importance_sampling(scene_usd, priors, truth_json, default_camera, scene_makeup, folder, 10)

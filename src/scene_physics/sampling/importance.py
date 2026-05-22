@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+import numpy as np
 
 from scene_physics.properties.shapes import Object_Collection
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
@@ -43,6 +44,7 @@ class ImportanceSampler:
 
     def gen_plots(self, save_dir):
         self._plot_top_likelihood(save_dir)
+        self._plot_avg_likelihood(save_dir)
 
 
     def _plot_top_likelihood(self, save_dir):
@@ -53,4 +55,14 @@ class ImportanceSampler:
         plt.xlabel("Iteration")
         plt.ylabel("Max Likelihood")
         plt.savefig(f"{save_dir}/max_likelihood.png")
+        plt.clf()
+
+    def _plot_avg_likelihood(self, save_dir):
+        avg_likelihood = [np.mean(sim_round) for sim_round in self.likelihood]
+        plt.plot(list(range(len(avg_likelihood))), avg_likelihood)
+        
+        plt.title("Avg Likelihood Over Iterations")
+        plt.xlabel("Iteration")
+        plt.ylabel("Avg Likelihood")
+        plt.savefig(f"{save_dir}/avg_likelihood.png")
         plt.clf()

@@ -74,7 +74,7 @@ class Dynamic(Body):
         proposals[self.allocs] = self.proposer.propose(positions, likelihoods)
 
         # Save a copy of highest likelihood location (allocs[0] = best world's body)
-        self.plots.append(proposals[self.allocs[0]].copy())
+        self.plots.append(proposals[self.allocs].copy())
 
         scene.body_q = self._numpy_to_warp(proposals)
         return scene
@@ -89,11 +89,14 @@ class Dynamic(Body):
         self._plot_xy_position(save_dir)
 
     def _plot_xy_position(self, save_dir):
-        positions = np.array(self.plots)[:, :3]  # (iters, 3)
-        iters = np.arange(len(positions))
+        positions = np.array(self.plots)
+        n, nw, size = positions.shape
+
+        flat = positions.reshape(-1, size)
+        iters = np.repeat(np.arange(n), nw)
 
         fig, ax = plt.subplots()
-        sc = ax.scatter(positions[:, 0], positions[:, 1], c=iters, cmap="viridis")
+        sc = ax.scatter(flat[:, 0], flat[:, 1], c=iters, cmap="viridis")
         fig.colorbar(sc, ax=ax, label="Iteration")
 
         ax.set_title(f"XY Position of {self.name}")
