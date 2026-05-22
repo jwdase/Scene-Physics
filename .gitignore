@@ -220,6 +220,7 @@ __marimo__/
 
 # 3D model files
 *.obj
+ .mtl
 
 # USD files
 *.usd
