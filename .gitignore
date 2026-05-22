@@ -215,6 +215,18 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
+# macOS metadata
+.DS_Store
+
+# 3D model files
+*.obj
+
+# USD files
+*.usd
+*.usda
+*.usdc
+*.usdz
+
 # Binary outputs / generated artifacts
 *.mp4
 *.ply
