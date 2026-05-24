@@ -70,10 +70,12 @@ def run_simulation(scene_usd, output_path):
 
 
 if __name__ == "__main__":
-    scene_usd = "scene01/data/scene01_physics.usdc"
-    output_path = "scene01/data/scene01_recording.usdc"
+    import sys
 
-    run_simulation(scene_usd, output_path)
+    if len(sys.argv) == 3:
+        run_simulation(sys.argv[1], sys.argv[2])
+    else:
+        print("Usage: simulation.py <scene_usd> <output_path>")
+        sys.exit(1)
 
-    
 

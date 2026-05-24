@@ -213,16 +213,19 @@ default_camera = CameraIntrinsics(width=640, height=480, fov_degree=60,)
 
 if __name__ == "__main__":
 
-    scene_usd = "scene01/data/scene01_physics.usdc"
-    priors = "scene01/data/scene01_priors.json"
-    truth_json = "scene01/data/scene01_truth.json"
+    scene_usd = "scene002/data/scene002_physics.usdc"
+    priors = "scene002/data/scene002_priors.json"
+    truth_json = "scene002/data/scene002_truth.json"
 
-    folder = "scene01/results"
+    folder = "scene002/results"
 
+    makeup_json = "scene002/data/scene002_makeup.json"
+    with open(makeup_json) as f:
+        mk = json.load(f)
     scene_makeup = Scene_Makeup(
-        static=['dining_room_table'],
-        observed=['coffee_0023', 'soap_dispenser_01'],
-        hidden=['f10_apple_iphone_4'],
-        )
+        static=mk["static"],
+        observed=mk["observed"],
+        hidden=mk["hidden"],
+    )
 
     scene, model, x = run_importance_sampling(scene_usd, priors, truth_json, default_camera, scene_makeup, folder, 10)

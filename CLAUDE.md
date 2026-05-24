@@ -24,6 +24,12 @@ uv run isort .
 uv run pytest
 ```
 
+To **generate a benchmark dataset of scenes** (a separate workflow that produces the USD + priors/truth that a sampling run consumes), see the **Scene Dataset Generation** section below:
+```bash
+cd src/scene_physics
+uv run python -m scene_physics.data_gen.scene_gen
+```
+
 ## Canonical Script Structure
 
 `simulation/sim_sampling.py::run_importance_sampling` is the canonical entry point. It runs five phases:
@@ -144,6 +150,86 @@ Object_Collection.assign_priors(prior_json, NoDecayProposal, rng)
               ├── self.prior    = Prior(prior_dict)
               └── self.proposer = NoDecayProposal(child_rng, self.prior)
 ```
+
+---
+
+## Scene Dataset Generation (`data_gen/`)
+
+Generates a benchmark dataset of `~N` scenes — each a self-contained copy of the `scene01/data/` layout — from the raw OBJ library in `resources/objects/objects/`. Every scene is a physically settled tabletop: a static table, one **hidden** occluded target (a flat-laid wood block), a generator-drawn **occluder** in front of it, and several **observed** surrounders — one of which is dropped to **rest on the hidden target** as a physics-interaction probe (a *visible* object whose settled pose couples, via physics, to the *hidden* block's). The output is drop-in for `sim_sampling.py`.
+
+**Files**
+- `data_gen/object_library.py` — load `.obj` → Z-up `newton.Mesh` (+ AABB / `center` / `height`), `lru_cache`d; `available_objects()`, `sample_objects(...)`.
+- `data_gen/usd_export.py` — `write_layout_usd(...)` authors a `scene01`-style physics USD; `safe_usd_name(...)`.
+- `data_gen/scene_gen.py` — the Drop-&-Settle generator: `SceneSpec`, `generate_scene`, `generate_dataset`.
+- `data_gen/__init__.py` — re-exports the public API.
+
+**Run** (from `src/scene_physics/`): `uv run python -m scene_physics.data_gen.scene_gen` (edit the `__main__` block to configure), or programmatically:
+```python
+from scene_physics.data_gen import SceneSpec, generate_dataset, available_objects
+spec = SceneSpec(
+    target="square_wood_block",                  # flat-laid -> stable ~7.7x7.7 cm, 3 cm-tall platform
+    pool=["jug04", "bee", "glass1", "int_kitchen_accessories_le_creuset_bowl_30cm",
+          "b03_loafbread", "bung", "orange", "pepper", "coffeemug", "coffeecup004_fix",
+          "shark", "heart", "banana_fix2", "star_wood_block",
+          "round_coaster_stone", "f10_apple_iphone_4", "b03_cocacola_can_cage"],
+    n_surrounders=4)                             # -> 6 placed objects/scene (target + occluder + 4)
+generate_dataset(spec, n_scenes=100, out_root="generated_scenes", seed=0)
+```
+`SceneSpec(target, pool, n_surrounders=4, table="dining_room_table")`: you name the target; the generator draws the occluder (height-weighted) and samples surrounders from `pool`. **Curate `pool` to tabletop scale and keep the tallest objects out**: the occluder is drawn from the pool, and a tall occluder buries the object resting on the low block (see *Physics-interaction probe* below). `available_objects()` lists the ~193 names.
+
+**Per-scene output** under `<out_root>/sceneNNN/`:
+- `data/sceneNNN_physics.usdc` — layout USD, re-readable by `add_usd` (identical structure to `scene01_physics.usdc`).
+- `data/sceneNNN_truth.json` — `{name: [x,y,z,qx,qy,qz,qw]}` for the table + every dynamic object (settled poses).
+- `data/sceneNNN_priors.json` — per dynamic object, in the `scene01` prior schema.
+- `data/sceneNNN_makeup.json` — `{static, observed, hidden, occluder, target}`, ready to build `Scene_Makeup`.
+- `results/` — empty, pre-created (so the GT render won't `FileNotFoundError`).
+
+**Pipeline** (one attempt = `_attempt_scene`, retried up to `MAX_RETRIES`):
+1. `_sample_placements` — the **occluder is a height-weighted random draw** (`_draw_occluder`, `OCCLUDER_HEIGHT_BIAS` — not always the tallest, so a shorter occluder is sometimes chosen and the resting object can show above it); surrounders sampled from the pool. XY placed by **rejection sampling** so footprints don't overlap (the main cause of XPBD blow-ups); target near table center, laid flat via `TARGET_BASE_QUAT`; occluder just in front on the **−Y (camera) side**. With probability `P_STACK` one **small, squat** surrounder (`STACK_MAX_FOOT`/`STACK_MAX_HEIGHT`) is dropped onto the target's top to rest on it. Initial orientation = random yaw about Z, dropped `DROP_LIFT` above the table.
+2. `_build_model` — Z-up `ModelBuilder`; table = static collider via `add_shape_mesh(body=-1, density=0)`; dynamics via `add_shape_convex_hull` (matches the USD's `convexHull` approximation and is stable).
+3. `_settle` — XPBD (`SUBSTEPS`×`SOLVER_ITERS`) until `max|body_qd| < REST_THRESH` or `MAX_SETTLE_FRAMES`.
+4. **Validate** — `at_rest`, `_on_table` (each object's world AABB-center over the table), and `_occluded_fraction(target) ≥ OCCLUSION_THRESH`. For a stack scene also: the stacked object is in **true contact** with the target (`_contact_pair_exists` after re-colliding at the tight `STACK_CONTACT_MARGIN`), is **resting on its top face** (`_rests_on_target`, within `STACK_REST_Z_TOL`), and stays **visible** (`_visible_fraction ≥ STACK_VISIBLE_THRESH`). Any failure → retry with a fresh draw (up to `MAX_RETRIES`, now 25).
+5. `_write_artifacts` — emit the four files + `results/`.
+
+Heavy GPU objects are localized to `_attempt_scene` and `gc.collect()`'d every attempt → steady-state memory (runs 100 scenes on an 8 GB GPU). The resting-contact + visibility gates raise the retry count (mean ~7 attempts, occasionally near the `MAX_RETRIES`=25 cap), so per-scene time — and the chance of an occasional skipped scene — are higher than the old tilt-gate pipeline.
+
+**Prior semantics**
+- **Hidden target**: mean = the occluder's center — `(x, y)` of the occluder's settled AABB-centroid, `z` = table top, identity rotation. (Encodes "the hidden object is probably where the thing blocking it sits.")
+- **Observed** (occluder + surrounders): mean = their own settled truth.
+- Bounds `x/y_min/max` for every object = the table's XY AABB.
+
+**Occlusion / visibility check** (`_occluded_fraction(name)`, generic over any object): render full settled-scene depth vs the named object rendered alone (default `CameraIntrinsics`, full meshes); a silhouette pixel counts as occluded when something is nearer in the full scene by `DEPTH_MARGIN`. The hidden target must be ≥ `OCCLUSION_THRESH` (0.5) occluded; `_visible_fraction = 1 − _occluded_fraction` gates the stacked object's visibility.
+
+**Physics-interaction probe (resting contact).** Each scene drops one small surrounder onto the hidden block so a *visible* object's settled pose couples (via physics) to the *hidden* target's pose. A stack is accepted only as a genuine resting contact:
+- **True contact** — `model.collide` emits a contact for any pair within `shape_contact_margin`, whose Newton default is **0.1 m** (≈10 cm) — far too loose to mean "touching" (a two-box rig confirms boxes 15 cm apart register as "contact"). `_attempt_scene` therefore sets `shape_contact_margin = STACK_CONTACT_MARGIN` (0.01 m) and re-collides before `_contact_pair_exists` (touching ⇒ within ~0.5 cm). The `dot(normal, p1−p0)` gap is *not* reliable (reads 0–5 cm regardless of true gap), hence the tight-margin re-collide.
+- **On the top face** — `_rests_on_target` requires the stacked object's lowest world-z within `STACK_REST_Z_TOL` of the target's top (resting on the block, not standing beside it).
+- **Stays visible** — `_visible_fraction(stacked) ≥ STACK_VISIBLE_THRESH`. The resting object is the cue, so it must not be buried by the occluder. **This is why the occluder is a height-weighted draw (not always the tallest) and why the tall objects are kept out of the pool**: a 30–40 cm occluder that hides the 3 cm block also buries a short object on it. Removing the tall objects (occluders then 5–18 cm) raised the visible-interaction rate from ~50% to 100% in a 16-scene check, at the cost of more retries.
+- Only small/squat surrounders (`STACK_MAX_FOOT` 0.06 m, `STACK_MAX_HEIGHT` 0.16 m) are eligible to be stacked, so they settle on the narrow ~7.7 cm block top instead of toppling.
+
+**Conventions & gotchas (data_gen-specific)**
+- **OBJ are Y-up**: library assets export from Blender Y-up; `load_object` rotates to Z-up via `(x,y,z)→(x,−z,y)` (pure rotation; reproduces scene01 geometry). Sizes stay at **native `.obj` scale** — no normalization.
+- **Curate the pool to tabletop scale.** Some assets are huge at native scale (`b04_orange_00` ≈ 1.2 m) and topple/eject → every attempt fails. Use small objects.
+- **Physics = convex hull, rendering = full mesh.** The settle and the exported USD use convex hulls; the ray-trace sensor *cannot render hulls* (`Unsupported shape geom type: 10`), so the occlusion check and the downstream GT point cloud use `add_shape_mesh` (full visual mesh). Never render a convex-hull-only model.
+- **Digit-leading names** can't be USD prim names; `safe_usd_name` prefixes `_` (`9v_battery` → `_9v_battery`) consistently across the prim path **and** all JSON keys, so the reloaded `body_key` leaf matches the keys. (Such objects appear under the sanitized name in truth/priors/makeup.)
+- **Quaternions** are canonicalized to the `qw ≥ 0` hemisphere so `truth.json` matches the `add_usd` readback; near-180° rotations stay sign-ambiguous (double cover) — compare rotations, not raw components.
+- **Mass**: dynamics settle with `density=DENSITY`; Newton's computed per-body mass is written into the USD (`PhysicsMassAPI`), so in-memory truth and the reloaded USD agree.
+- **Rolling friction** is set on dynamics so cans/batteries stop rather than rolling forever (else they never reach `at_rest`).
+
+Tunables are constants at the top of `scene_gen.py`: physics (gravity, density, friction, solver/substeps, settle frames, `REST_THRESH`); placement (`PLACE_MARGIN`, `OCCLUDER_GAP`, `OCCLUDER_HEIGHT_BIAS`, `P_NEAR`, `P_STACK`); target orientation (`TARGET_BASE_QUAT`); stack acceptance (`STACK_CONTACT_MARGIN`, `STACK_REST_Z_TOL`, `STACK_MAX_FOOT`, `STACK_MAX_HEIGHT`, `STACK_VISIBLE_THRESH`); occlusion (`OCCLUSION_THRESH`, `DEPTH_MARGIN`); and `MAX_RETRIES` (25).
+
+**Consuming a generated scene** (drop-in for `sim_sampling.py`):
+```python
+import json
+mk = json.load(open("generated_scenes/scene001/data/scene001_makeup.json"))
+scene_makeup = Scene_Makeup(static=set(mk["static"]), observed=set(mk["observed"]), hidden=set(mk["hidden"]))
+run_importance_sampling(
+    "generated_scenes/scene001/data/scene001_physics.usdc",
+    "generated_scenes/scene001/data/scene001_priors.json",
+    default_camera, scene_makeup, "generated_scenes/scene001/results")
+```
+The table is a static collider, so it is **not** in `model.body_key` (only dynamics are); every body name is in the makeup's observed/hidden, so `object_collection` won't trip the ground/table assert.
+
+**Verified this build**: USD round-trips (positions exact, rotation ≈0°); re-simulating a scene's truth drifts ~0.4 mm over 40 frames (a genuine rest state); `object_collection` consumes generated scenes unmodified. Resting-contact rewrite (16-scene check, `square_wood_block` target + trimmed pool): **16/16 scenes had a verified visible object resting on the block** (re-checked independently from `truth.json`), occluder heights 5–18 cm, occlusion 0.55–1.0, mean ~7 attempts.
 
 ---
 

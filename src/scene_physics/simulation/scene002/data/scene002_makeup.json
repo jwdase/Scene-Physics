@@ -1,0 +1,17 @@
+{
+    "static": [
+        "dining_room_table"
+    ],
+    "observed": [
+        "coffee_0023",
+        "aaa_battery",
+        "b03_loafbread",
+        "b03_cocacola_can_cage",
+        "b04_wineglass"
+    ],
+    "hidden": [
+        "f10_apple_iphone_4"
+    ],
+    "occluder": "coffee_0023",
+    "target": "f10_apple_iphone_4"
+}
