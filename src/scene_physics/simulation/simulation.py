@@ -12,7 +12,7 @@ VERTICAL = "Z"
 SUBSTEPS = 4
 SOLVER_ITERATIONS = 8
 
-def run_simulation(scene_usd, output_path):
+def run_simulation_save(scene_usd, output_path):
 
     builder = newton.ModelBuilder()
     builder.add_ground_plane()
@@ -67,6 +67,47 @@ def run_simulation(scene_usd, output_path):
 
     gl_viewer.close()
 
+
+def run_simulation(scene_usd, output_path):
+    builder = newton.ModelBuilder()
+    builder.add_ground_plane()
+    builder.add_usd(scene_usd, skip_mesh_approximation=True)
+
+    model = builder.finalize()
+    state = model.state()
+
+    solver = newton.solvers.SolverXPBD(model, iterations=SOLVER_ITERATIONS)
+    contacts = model.collide(state)
+
+    num_frames = int(DURATION * FPS)
+    gl_viewer = ViewerGL()
+
+    gl_viewer.set_model(model)
+
+    dt = 1.0 / FPS
+    sub_dt = dt / SUBSTEPS
+    t = 0.0
+
+    for _ in range(num_frames):
+        gl_viewer.begin_frame(t)
+
+        for _ in range(SUBSTEPS):
+            contacts = model.collide(state)
+            state_next = model.state()
+            solver.step(state, state_next, None, contacts, sub_dt)
+            state = state_next
+
+        gl_viewer.log_state(state)
+
+        gl_viewer.end_frame()
+        t += dt
+
+    while gl_viewer.is_running():
+        gl_viewer.begin_frame(t)
+        gl_viewer.log_state(state)
+        gl_viewer.end_frame()
+
+    gl_viewer.close()
 
 
 if __name__ == "__main__":

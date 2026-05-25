@@ -106,7 +106,7 @@ CANDIDATE_BUDGET = 25
 # Worlds settled simultaneously per batch by generate_dataset_parallel (one GPU, no sharding).
 # Size to GPU memory: each world holds the hull settle bodies plus, transiently, full-mesh
 # render copies. ~64 is comfortable on an 80 GB H100; drop it on smaller cards.
-DEFAULT_BATCH_WORLDS = 4        # TODO change when on H100
+DEFAULT_BATCH_WORLDS = 64
 TABLE = "dining_room_table"
 
 
@@ -359,47 +359,67 @@ def _build_batched_model(table: LoadedObject, batch: list[list[_Placement]]):
     return main.finalize(), indices
 
 
-def _settle(model):
-    s0, s1 = model.state(), model.state()
-    solver = SolverXPBD(model, iterations=SOLVER_ITERS)
-    control = model.control()
+def _settle_loop(model):
+    """Forward-simulate XPBD until rest (or MAX_SETTLE_FRAMES); return the final State.
 
-    for frame in range(MAX_SETTLE_FRAMES):
-        for _ in range(SUBSTEPS):
-            s0.clear_forces()
-            contacts = model.collide(s0)
-            solver.step(s0, s1, control, contacts, SUB_DT)
-            s0, s1 = s1, s0
-        if frame >= MIN_SETTLE_FRAMES and (frame + 1) % REST_CHECK_EVERY == 0:
-            if np.abs(s0.body_qd.numpy()).max() < REST_THRESH:
-                break
+    The SUBSTEPS-long substep loop is captured once as a CUDA graph and replayed once per
+    frame, so the ~MAX_SETTLE_FRAMES*SUBSTEPS individual collide/solve kernel launches collapse
+    into one graph launch per frame. On a fast GPU the settle was launch-overhead bound (each
+    kernel is tiny but every launch pays host->device latency), so the replay is the main win.
+    Rest is polled on the host only every REST_CHECK_EVERY frames, between launches, so the hot
+    path carries no GPU->CPU sync.
 
-    at_rest = float(np.abs(s0.body_qd.numpy()).max()) < REST_THRESH
-    return s0, s0.body_q.numpy(), at_rest
-
-
-def _settle_batched(model):
-    """Settle every world in a batched model with one shared XPBD loop.
-
-    All worlds are stepped together; the early-out fires only when *every* world is at rest
-    (global max velocity), so a slow world just extends the sim for the batch. Per-world rest
-    is decided later by slicing body_qd with each world's body indices. Returns the final
-    state, the flat settled body_q, and the flat settled body_qd.
+    Works for a single-world or a batched (add_world) model alike: when every body's spatial
+    velocity is below REST_THRESH the global max trips the early-out, so a single slow world
+    just extends the sim for the whole batch. Off CUDA it falls back to an eager loop.
     """
     s0, s1 = model.state(), model.state()
     solver = SolverXPBD(model, iterations=SOLVER_ITERS)
     control = model.control()
 
-    for frame in range(MAX_SETTLE_FRAMES):
+    def substep_frame():
+        nonlocal s0, s1
         for _ in range(SUBSTEPS):
             s0.clear_forces()
             contacts = model.collide(s0)
             solver.step(s0, s1, control, contacts, SUB_DT)
             s0, s1 = s1, s0
+
+    use_graph = wp.get_device().is_cuda
+    graph = None
+    for frame in range(MAX_SETTLE_FRAMES):
+        if not use_graph:
+            substep_frame()
+        elif graph is None:
+            # First frame: run eagerly to compile kernels and allocate the contact buffers,
+            # then capture the same frame for replay. SUBSTEPS is even, so the state buffers
+            # alias back to (s0, s1) after each frame and the captured launch sequence stays
+            # valid on every replay. Capture records without executing, so it adds no frame.
+            substep_frame()
+            with wp.ScopedCapture() as capture:
+                substep_frame()
+            graph = capture.graph
+        else:
+            wp.capture_launch(graph)
         if frame >= MIN_SETTLE_FRAMES and (frame + 1) % REST_CHECK_EVERY == 0:
             if np.abs(s0.body_qd.numpy()).max() < REST_THRESH:
                 break
+    return s0
 
+
+def _settle(model):
+    s0 = _settle_loop(model)
+    at_rest = float(np.abs(s0.body_qd.numpy()).max()) < REST_THRESH
+    return s0, s0.body_q.numpy(), at_rest
+
+
+def _settle_batched(model):
+    """Settle every world in a batched model with one shared (graph-captured) XPBD loop.
+
+    Per-world rest is decided later by slicing body_qd with each world's body indices.
+    Returns the final state, the flat settled body_q, and the flat settled body_qd.
+    """
+    s0 = _settle_loop(model)
     return s0, s0.body_q.numpy(), s0.body_qd.numpy()
 
 
@@ -754,9 +774,13 @@ def generate_dataset_parallel(spec, n_scenes, out_root, num_worlds=DEFAULT_BATCH
     target = spec.target
     max_depth = intrinsics.max_depth
 
+    print(f"[generate_dataset_parallel] allocating {num_worlds} worlds/batch on "
+          f"{wp.get_device()} -> {n_scenes} scenes (candidate budget {max_candidates})")
+
     stats_path = out_root / "scene_stats.txt"
     results = []
     candidates = 0
+    round_idx = 0
     with open(stats_path, "w") as stats:
         stats.write(f"# target={spec.target}\tocclusion_thresh={OCCLUSION_THRESH:.2f}"
                     f"\tseed={seed}\tnum_worlds={num_worlds}\n")
@@ -764,6 +788,8 @@ def generate_dataset_parallel(spec, n_scenes, out_root, num_worlds=DEFAULT_BATCH
         stats.flush()
 
         while len(results) < n_scenes and candidates < max_candidates:
+            round_idx += 1
+            good_before = len(results)
             bs = min(num_worlds, max_candidates - candidates)
 
             # 1. Sample bs independent candidate scenes.
@@ -825,6 +851,9 @@ def generate_dataset_parallel(spec, n_scenes, out_root, num_worlds=DEFAULT_BATCH
             del model, state, contacts, depth_full, depth_tgt, depth_stk
             gc.collect()
 
+            print(f"[round {round_idx}] settled {bs} worlds, kept {len(results) - good_before} "
+                  f"-> {len(results)}/{n_scenes} scenes ({candidates} candidates tried)")
+
         yield_pct = len(results) / candidates if candidates else 0.0
         stats.write(f"# saved {len(results)}/{n_scenes} good scenes from {candidates} "
                     f"candidates (yield {yield_pct:.1%})\n")
@@ -853,9 +882,9 @@ if __name__ == "__main__":
             "vase_05",                   # ~27 cm
         ],
         "small": [
-            "b03_loafbread", "bung", "pepper", "coffeemug", "coffeecup004_fix",
+            "b03_loafbread", "bung", "pepper", "coffeemug",
             "shark", "heart", "banana_fix2", "star_wood_block",
-            "round_coaster_stone", "f10_apple_iphone_4", "b03_cocacola_can_cage",
+            "round_coaster_stone", "f10_apple_iphone_4",
         ],
     }
     spec = SceneSpec(target="square_wood_block", pool=pool, n_mid=2, n_small=3)
