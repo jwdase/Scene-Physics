@@ -11,6 +11,7 @@ from scene_physics.data_gen.scene_gen import (
     SceneResult,
     SceneSpec,
     generate_dataset,
+    generate_dataset_parallel,
     generate_scene,
 )
 
@@ -25,5 +26,6 @@ __all__ = [
     "SceneResult",
     "SceneSpec",
     "generate_dataset",
+    "generate_dataset_parallel",
     "generate_scene",
 ]

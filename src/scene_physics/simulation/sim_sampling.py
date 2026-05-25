@@ -32,7 +32,7 @@ TARGET = np.zeros(3)
 UP = np.array([0, 0, 1]) 
 
 UP_AXIS = newton.Axis.Z 
-NUM_WORLDS = 15
+NUM_WORLDS = int(os.environ.get("NUM_WORLDS", 15))
 
 @dataclass
 class CameraIntrinsics:
