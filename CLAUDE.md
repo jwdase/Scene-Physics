@@ -160,22 +160,31 @@ Generates a benchmark dataset of `~N` scenes — each a self-contained copy of t
 **Files**
 - `data_gen/object_library.py` — load `.obj` → Z-up `newton.Mesh` (+ AABB / `center` / `height`), `lru_cache`d; `available_objects()`, `sample_objects(...)`.
 - `data_gen/usd_export.py` — `write_layout_usd(...)` authors a `scene01`-style physics USD; `safe_usd_name(...)`.
-- `data_gen/scene_gen.py` — the Drop-&-Settle generator: `SceneSpec`, `generate_scene`, `generate_dataset`.
+- `data_gen/scene_gen.py` — the Drop-&-Settle generator: `SceneSpec`, `generate_scene`, `generate_dataset` (sequential), `generate_dataset_parallel` (batched single-GPU).
 - `data_gen/__init__.py` — re-exports the public API.
 
-**Run** (from `src/scene_physics/`): `uv run python -m scene_physics.data_gen.scene_gen` (edit the `__main__` block to configure), or programmatically:
+**Run** (from `src/scene_physics/`): `uv run python -m scene_physics.data_gen.scene_gen` runs the `__main__` block, which calls **`generate_dataset_parallel`** (batched single-GPU generation, see below) and writes to `src/scene_physics/generated_scenes/` — that path is anchored to the script, so it no longer depends on the cwd. Edit `__main__` to configure, or call programmatically:
 ```python
-from scene_physics.data_gen import SceneSpec, generate_dataset, available_objects
+from scene_physics.data_gen import (
+    SceneSpec, generate_dataset, generate_dataset_parallel, available_objects,
+)
 spec = SceneSpec(
     target="square_wood_block",                  # flat-laid -> stable ~7.7x7.7 cm, 3 cm-tall platform
-    pool=["jug04", "bee", "glass1", "int_kitchen_accessories_le_creuset_bowl_30cm",
-          "b03_loafbread", "bung", "orange", "pepper", "coffeemug", "coffeecup004_fix",
-          "shark", "heart", "banana_fix2", "star_wood_block",
-          "round_coaster_stone", "f10_apple_iphone_4", "b03_cocacola_can_cage"],
-    n_surrounders=4)                             # -> 6 placed objects/scene (target + occluder + 4)
+    pool={
+        "mid_height": ["jug04", "bee", "glass1", "int_kitchen_accessories_le_creuset_bowl_30cm",
+                       "b05_coffee_grinder", "b04_candle_holder_metal", "vase_05"],
+        "small":      ["b03_loafbread", "bung", "orange", "pepper", "coffeemug", "coffeecup004_fix",
+                       "shark", "heart", "banana_fix2", "star_wood_block",
+                       "round_coaster_stone", "f10_apple_iphone_4", "b03_cocacola_can_cage"],
+    },
+    n_mid=2, n_small=3)                          # -> 6 placed objects/scene (target + 2 mid [1 occluder] + 3 small)
+# Sequential oversample-and-filter (one world per attempt):
 generate_dataset(spec, n_scenes=100, out_root="generated_scenes", seed=0)
+# OR batched single-GPU: settle `num_worlds` candidate scenes at once, keep passers (one
+# process, one GPU, no sharding). Size num_worlds to the card (~64 on an 80 GB H100):
+generate_dataset_parallel(spec, n_scenes=100, out_root="generated_scenes", num_worlds=64, seed=0)
 ```
-`SceneSpec(target, pool, n_surrounders=4, table="dining_room_table")`: you name the target; the generator draws the occluder (height-weighted) and samples surrounders from `pool`. **Curate `pool` to tabletop scale and keep the tallest objects out**: the occluder is drawn from the pool, and a tall occluder buries the object resting on the low block (see *Physics-interaction probe* below). `available_objects()` lists the ~193 names.
+`SceneSpec(target, pool, n_mid=2, n_small=3, table="dining_room_table")`: you name the target; `pool` is a role-split dict (`{"mid_height": [...], "small": [...]}`). Each scene samples exactly `n_mid` mid-height objects and `n_small` small ones (each accepts an `int` or a `(lo, hi)` range). The **occluder is a height-weighted draw from the sampled `mid_height` objects and counts toward `n_mid`** (so `n_mid` must be ≥ 1); the remaining mid + all small objects are the surrounders. **Curate each list to tabletop scale**: `mid_height` are the occluder candidates (a tall occluder buries the object resting on the low block — see *Physics-interaction probe* below), `small` are the surrounders (several squat enough to be stacked on the block). `available_objects()` lists the ~193 names.
 
 **Per-scene output** under `<out_root>/sceneNNN/`:
 - `data/sceneNNN_physics.usdc` — layout USD, re-readable by `add_usd` (identical structure to `scene01_physics.usdc`).
@@ -183,22 +192,29 @@ generate_dataset(spec, n_scenes=100, out_root="generated_scenes", seed=0)
 - `data/sceneNNN_priors.json` — per dynamic object, in the `scene01` prior schema.
 - `data/sceneNNN_makeup.json` — `{static, observed, hidden, occluder, target}`, ready to build `Scene_Makeup`.
 - `results/` — empty, pre-created (so the GT render won't `FileNotFoundError`).
+- At the dataset root: `<out_root>/scene_stats.txt` — a tab-separated log written incrementally, one row per saved scene (`occluded_fraction`, `occluder`, `candidate`, `surrounders`), a header (`target`, `occlusion_thresh`, `seed`, and `num_worlds` for the batched path) and a final yield footer.
 
-**Pipeline** (one attempt = `_attempt_scene`, retried up to `MAX_RETRIES`):
-1. `_sample_placements` — the **occluder is a height-weighted random draw** (`_draw_occluder`, `OCCLUDER_HEIGHT_BIAS` — not always the tallest, so a shorter occluder is sometimes chosen and the resting object can show above it); surrounders sampled from the pool. XY placed by **rejection sampling** so footprints don't overlap (the main cause of XPBD blow-ups); target near table center, laid flat via `TARGET_BASE_QUAT`; occluder just in front on the **−Y (camera) side**. With probability `P_STACK` one **small, squat** surrounder (`STACK_MAX_FOOT`/`STACK_MAX_HEIGHT`) is dropped onto the target's top to rest on it. Initial orientation = random yaw about Z, dropped `DROP_LIFT` above the table.
-2. `_build_model` — Z-up `ModelBuilder`; table = static collider via `add_shape_mesh(body=-1, density=0)`; dynamics via `add_shape_convex_hull` (matches the USD's `convexHull` approximation and is stable).
+**Pipeline** (one candidate scene; both drivers below are *oversample-and-filter* — a rejected candidate is **discarded, never retried**):
+1. `_sample_placements` — the **occluder is a height-weighted random draw** (`_draw_occluder`, `OCCLUDER_HEIGHT_BIAS` — not always the tallest, so a shorter occluder is sometimes chosen and the resting object can show above it) from the `mid_height` pool; surrounders are the remaining mid + all `small` picks. XY placed by **rejection sampling** so footprints don't overlap (the main cause of XPBD blow-ups); target near table center, laid flat via `TARGET_BASE_QUAT`; occluder just in front on the **−Y (camera) side**. With probability `P_STACK` one **small, squat** surrounder (`STACK_MAX_FOOT`/`STACK_MAX_HEIGHT`) is dropped onto the target's top to rest on it. Initial orientation = random yaw about Z, dropped `DROP_LIFT` above the table.
+2. `_build_model` (single world) / `_add_table_and_dynamics` (shared helper) — Z-up `ModelBuilder`; table = static collider via **`add_shape_box`** spanning the table AABB (top face at `aabb_max[2]`); dynamics via `add_shape_convex_hull`. The box replaced an `add_shape_mesh` table collider: the table `.obj` is a thin shell that dropped objects tunnelled through under the stacking impact, so **settling uses a solid box** while rendering and the exported USD keep the full visual mesh.
 3. `_settle` — XPBD (`SUBSTEPS`×`SOLVER_ITERS`) until `max|body_qd| < REST_THRESH` or `MAX_SETTLE_FRAMES`.
-4. **Validate** — `at_rest`, `_on_table` (each object's world AABB-center over the table), and `_occluded_fraction(target) ≥ OCCLUSION_THRESH`. For a stack scene also: the stacked object is in **true contact** with the target (`_contact_pair_exists` after re-colliding at the tight `STACK_CONTACT_MARGIN`), is **resting on its top face** (`_rests_on_target`, within `STACK_REST_Z_TOL`), and stays **visible** (`_visible_fraction ≥ STACK_VISIBLE_THRESH`). Any failure → retry with a fresh draw (up to `MAX_RETRIES`, now 25).
+4. **Validate** — `at_rest`, `_on_table` (each object's world AABB-center over the table), and `_occluded_fraction(target) ≥ OCCLUSION_THRESH`. For a stack scene also: the stacked object is in **true contact** with the target (`_contact_pair_exists` after re-colliding at the tight `STACK_CONTACT_MARGIN`), is **resting on its top face** (`_rests_on_target`, within `STACK_REST_Z_TOL`), and stays **visible** (`_visible_fraction ≥ STACK_VISIBLE_THRESH`). Any failure → the candidate is discarded.
 5. `_write_artifacts` — emit the four files + `results/`.
 
-Heavy GPU objects are localized to `_attempt_scene` and `gc.collect()`'d every attempt → steady-state memory (runs 100 scenes on an 8 GB GPU). The resting-contact + visibility gates raise the retry count (mean ~7 attempts, occasionally near the `MAX_RETRIES`=25 cap), so per-scene time — and the chance of an occasional skipped scene — are higher than the old tilt-gate pipeline.
+Heavy GPU objects are localized per candidate/batch and `gc.collect()`'d → steady-state memory (runs on an 8 GB GPU). There is **no per-scene retry**: each driver draws independent candidates and keeps the passers until `n_scenes` are saved or the candidate budget (`n_scenes * CANDIDATE_BUDGET`, 25) is hit. At the strict `OCCLUSION_THRESH=0.9` gate the yield is low (~7% in a small check), so expect many candidates per saved scene.
+
+**Single-GPU batched generation (`generate_dataset_parallel`).** Instead of one scene at a time, allocate `num_worlds` candidate scenes as `num_worlds` collision-isolated Newton **worlds** in one model and run the physics on all of them at once (no job sharding — one process, one GPU):
+- `_build_batched_model` samples `num_worlds` **independent** scenes (each its own `_sample_placements` draw — *not* copies of one scene; contrast `build_worlds`/`replicate` in `sim_sampling.py`, which replicates one scene) and adds each as a separate world via `ModelBuilder.add_world` (all stacked at the origin; isolation is by world index, not spacing). With fixed `n_mid`/`n_small` every world has the same 6 dynamic bodies; per-world `{name: global_body_index}` dicts come from the body-count offset captured before each `add_world`.
+- `_settle_batched` settles every world in one XPBD loop; per-world rest is read by slicing `body_qd` with each world's indices.
+- Validation reuses the single-world gates per world; occlusion is **three batched depth renders** (full scene / target-only / stacked-only) via a `num_worlds`-sized `Camera`, reading per-world depth from `depth_image[w, 0]`.
+- Passers are written and batches repeat until `n_scenes` good (or the budget). `DEFAULT_BATCH_WORLDS` sizes the batch to GPU memory (~64 on an 80 GB H100; the 3-pass full-mesh render is the memory peak, so drop it on small cards). This is the path `__main__` runs. The `candidate` column is bumped per batch, so it is a cumulative count of scenes drawn, not a unique per-scene index.
 
 **Prior semantics**
 - **Hidden target**: mean = the occluder's center — `(x, y)` of the occluder's settled AABB-centroid, `z` = table top, identity rotation. (Encodes "the hidden object is probably where the thing blocking it sits.")
 - **Observed** (occluder + surrounders): mean = their own settled truth.
 - Bounds `x/y_min/max` for every object = the table's XY AABB.
 
-**Occlusion / visibility check** (`_occluded_fraction(name)`, generic over any object): render full settled-scene depth vs the named object rendered alone (default `CameraIntrinsics`, full meshes); a silhouette pixel counts as occluded when something is nearer in the full scene by `DEPTH_MARGIN`. The hidden target must be ≥ `OCCLUSION_THRESH` (0.5) occluded; `_visible_fraction = 1 − _occluded_fraction` gates the stacked object's visibility.
+**Occlusion / visibility check** (`_occluded_fraction(name)`, generic over any object): render full settled-scene depth vs the named object rendered alone (default `CameraIntrinsics`, full meshes); a silhouette pixel counts as occluded when something is nearer in the full scene by `DEPTH_MARGIN`. The hidden target must be ≥ `OCCLUSION_THRESH` (0.9) occluded; `_visible_fraction = 1 − _occluded_fraction` gates the stacked object's visibility. (The batched path computes the same fraction from per-world depth slices via `_occ_frac`.)
 
 **Physics-interaction probe (resting contact).** Each scene drops one small surrounder onto the hidden block so a *visible* object's settled pose couples (via physics) to the *hidden* target's pose. A stack is accepted only as a genuine resting contact:
 - **True contact** — `model.collide` emits a contact for any pair within `shape_contact_margin`, whose Newton default is **0.1 m** (≈10 cm) — far too loose to mean "touching" (a two-box rig confirms boxes 15 cm apart register as "contact"). `_attempt_scene` therefore sets `shape_contact_margin = STACK_CONTACT_MARGIN` (0.01 m) and re-collides before `_contact_pair_exists` (touching ⇒ within ~0.5 cm). The `dot(normal, p1−p0)` gap is *not* reliable (reads 0–5 cm regardless of true gap), hence the tight-margin re-collide.
@@ -210,12 +226,13 @@ Heavy GPU objects are localized to `_attempt_scene` and `gc.collect()`'d every a
 - **OBJ are Y-up**: library assets export from Blender Y-up; `load_object` rotates to Z-up via `(x,y,z)→(x,−z,y)` (pure rotation; reproduces scene01 geometry). Sizes stay at **native `.obj` scale** — no normalization.
 - **Curate the pool to tabletop scale.** Some assets are huge at native scale (`b04_orange_00` ≈ 1.2 m) and topple/eject → every attempt fails. Use small objects.
 - **Physics = convex hull, rendering = full mesh.** The settle and the exported USD use convex hulls; the ray-trace sensor *cannot render hulls* (`Unsupported shape geom type: 10`), so the occlusion check and the downstream GT point cloud use `add_shape_mesh` (full visual mesh). Never render a convex-hull-only model.
+- **Table collider = box, settle-time only.** Settling uses a solid `add_shape_box` for the table (Pipeline step 2); the exported USD and all rendering keep the full table mesh. ⚠️ The box is **not** baked into the USD, so re-simulating the *exported* USD can tunnel the block through the table again — e.g. the `simulation/view_all_scenes.sh` viewer runs `simulation.py`, which loads the thin mesh with `skip_mesh_approximation=True` and steps physics. To inspect a generated scene, render its static settled poses rather than re-simulating; a re-sim consumer that needs stability must add its own box collider (or stop skipping mesh approximation and author a `boundingCube`/`convexHull` collider on the table).
 - **Digit-leading names** can't be USD prim names; `safe_usd_name` prefixes `_` (`9v_battery` → `_9v_battery`) consistently across the prim path **and** all JSON keys, so the reloaded `body_key` leaf matches the keys. (Such objects appear under the sanitized name in truth/priors/makeup.)
 - **Quaternions** are canonicalized to the `qw ≥ 0` hemisphere so `truth.json` matches the `add_usd` readback; near-180° rotations stay sign-ambiguous (double cover) — compare rotations, not raw components.
 - **Mass**: dynamics settle with `density=DENSITY`; Newton's computed per-body mass is written into the USD (`PhysicsMassAPI`), so in-memory truth and the reloaded USD agree.
 - **Rolling friction** is set on dynamics so cans/batteries stop rather than rolling forever (else they never reach `at_rest`).
 
-Tunables are constants at the top of `scene_gen.py`: physics (gravity, density, friction, solver/substeps, settle frames, `REST_THRESH`); placement (`PLACE_MARGIN`, `OCCLUDER_GAP`, `OCCLUDER_HEIGHT_BIAS`, `P_NEAR`, `P_STACK`); target orientation (`TARGET_BASE_QUAT`); stack acceptance (`STACK_CONTACT_MARGIN`, `STACK_REST_Z_TOL`, `STACK_MAX_FOOT`, `STACK_MAX_HEIGHT`, `STACK_VISIBLE_THRESH`); occlusion (`OCCLUSION_THRESH`, `DEPTH_MARGIN`); and `MAX_RETRIES` (25).
+Tunables are constants at the top of `scene_gen.py`: physics (gravity, density, friction, `SOLVER_ITERS`=32/`SUBSTEPS`, settle frames, `REST_THRESH`); placement (`PLACE_MARGIN`, `OCCLUDER_GAP`, `OCCLUDER_HEIGHT_BIAS`, `P_NEAR`, `P_STACK`, `DROP_LIFT`=0.02); target orientation (`TARGET_BASE_QUAT`); stack acceptance (`STACK_CONTACT_MARGIN`, `STACK_REST_Z_TOL`, `STACK_MAX_FOOT`, `STACK_MAX_HEIGHT`, `STACK_VISIBLE_THRESH`); occlusion (`OCCLUSION_THRESH`=0.9, `DEPTH_MARGIN`); and the oversample/parallel knobs `CANDIDATE_BUDGET` (25, candidate budget = `n_scenes * CANDIDATE_BUDGET`) and `DEFAULT_BATCH_WORLDS` (worlds per batch for `generate_dataset_parallel`).
 
 **Consuming a generated scene** (drop-in for `sim_sampling.py`):
 ```python
@@ -229,7 +246,7 @@ run_importance_sampling(
 ```
 The table is a static collider, so it is **not** in `model.body_key` (only dynamics are); every body name is in the makeup's observed/hidden, so `object_collection` won't trip the ground/table assert.
 
-**Verified this build**: USD round-trips (positions exact, rotation ≈0°); re-simulating a scene's truth drifts ~0.4 mm over 40 frames (a genuine rest state); `object_collection` consumes generated scenes unmodified. Resting-contact rewrite (16-scene check, `square_wood_block` target + trimmed pool): **16/16 scenes had a verified visible object resting on the block** (re-checked independently from `truth.json`), occluder heights 5–18 cm, occlusion 0.55–1.0, mean ~7 attempts.
+**Verified this build**: USD round-trips (positions exact, rotation ≈0°); `object_collection` consumes generated scenes unmodified. The **box table collider** fixes the stacking-impact penetration — settled targets rest exactly on the table top (`gap ≈ 0`) in both the sequential and batched paths. **Batched `generate_dataset_parallel`** validated end-to-end (3/3 scenes from 42 candidates at `OCCLUSION_THRESH=0.9`, occlusion ≥0.93, targets on-table, artifacts structurally identical to the sequential path); the core multi-world allocate+settle was checked at 4 worlds × 6 bodies with every world's target resting on the table.
 
 ---
 

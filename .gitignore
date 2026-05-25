@@ -219,8 +219,7 @@ __marimo__/
 .DS_Store
 
 # 3D model files
-*.obj
- .mtl
+.mtl
 
 # USD files
 *.usd
