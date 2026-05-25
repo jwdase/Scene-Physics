@@ -614,7 +614,9 @@ def _write_artifacts(scene_dir, name, table, placements, settled, index,
     for key, payload in (("truth", truth), ("priors", priors), ("makeup", makeup)):
         with open(paths[key], "w") as f:
             json.dump(payload, f, indent=4)
-    write_layout_usd(paths["usd"], bodies, gravity=abs(GRAVITY))
+    write_layout_usd(paths["usd"], bodies, gravity=abs(GRAVITY),
+                     friction=MU, restitution=RESTITUTION,
+                     rolling_friction=ROLL_FRICTION, torsional_friction=TORSION_FRICTION)
     return paths
 
 
