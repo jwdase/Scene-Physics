@@ -106,7 +106,7 @@ CANDIDATE_BUDGET = 25
 # Worlds settled simultaneously per batch by generate_dataset_parallel (one GPU, no sharding).
 # Size to GPU memory: each world holds the hull settle bodies plus, transiently, full-mesh
 # render copies. ~64 is comfortable on an 80 GB H100; drop it on smaller cards.
-DEFAULT_BATCH_WORLDS = 64
+DEFAULT_BATCH_WORLDS = 8
 TABLE = "dining_room_table"
 
 
