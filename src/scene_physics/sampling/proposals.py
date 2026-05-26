@@ -79,7 +79,38 @@ class Proposer:
         proposals[:, 0] = np.clip(proposals[:, 0], a_min=self.prior.x_min, a_max=self.prior.x_max)
         proposals[:, 1] = np.clip(proposals[:, 1], a_min=self.prior.y_min, a_max=self.prior.y_max)
         return proposals
+    
+class XYProposer(Proposer):
+    def initial_proposal(self):
+        np_xform = np.array(self.prior.xform)
+        proposals = np.tile(np_xform, (self.num_worlds, 1))
 
+        proposals[1:, :2] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(self.num_worlds - 1, 2))
+        
+        self._update()
+
+        return self._apply_bounds(proposals)    
+    
+    def propose(self, positions, likelihood):
+        proposals = np.zeros((self.num_worlds, 7))
+
+        # Keep Top Likelihood - Go into allocs to find top for that object
+        proposals[0, :] = positions[np.argmax(likelihood)]
+        
+        ranks = np.argsort(np.argsort(likelihood)) + 1  # 1-based so worst != 0
+        weights = ranks / ranks.sum()
+
+        idx = self.rng.choice(self.num_worlds, size=self.num_worlds-1, p=weights, replace=True)
+        proposals[1:, :] = positions[idx]
+
+        # Add Gaussian Noise
+        proposals[1:, :2] += self.rng.normal(loc=0.0, scale=self._cur_pos_std, size=(self.num_worlds - 1, 2))
+
+        self._update()
+
+        return self._apply_bounds(proposals)
+
+class XYZQProposer(Proposer):
     def initial_proposal(self):
         np_xform = np.array(self.prior.xform)
         proposals = np.tile(np_xform, (self.num_worlds, 1))
@@ -111,7 +142,7 @@ class Proposer:
 
         return self._apply_bounds(proposals)
 
-class NoDecayProposal(Proposer):
+class NoDecayProposal(XYProposer):
     def _update_pos_std(self):
         pass
     

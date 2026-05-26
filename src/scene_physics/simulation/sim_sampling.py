@@ -26,109 +26,17 @@ from scene_physics.properties.shapes import (
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
 from scene_physics.sampling.proposals import NoDecayProposal
 from scene_physics.sampling.importance import ImportanceSampler
+from scene_physics.configs.camera import CameraIntrinsics, default_camera
+from scene_physics.visualization.camera import SingleWorldCamera, MultiWorldCamera
+from scene_physics.utils.io import plot_target_scene
 
-EYE = np.array([0., -1.5, 1.5])
-TARGET = np.zeros(3)
-UP = np.array([0, 0, 1]) 
-
-UP_AXIS = newton.Axis.Z 
 NUM_WORLDS = int(os.environ.get("NUM_WORLDS", 15))
-
-@dataclass
-class CameraIntrinsics:
-    width : int
-    height : int
-    fov_degree: float
-    max_depth : float = 4.0
-
-    eye : np.ndarray = field(default_factory=lambda:EYE)
-    target : np.ndarray = field(default_factory=lambda:TARGET)
-    up : np.ndarray = field(default_factory=lambda:UP)
-
-    @property
-    def fov_rad(self):
-        return np.radians(self.fov_degree)
-
 
 @dataclass
 class Experiment:
     iterations : int
     decay_method : str
 
-
-NUM_CAMERAS = 1
-
-class Camera:
-    def __init__(self, intrinsics : CameraIntrinsics, model, num_worlds : int):
-        self.intrinsics = intrinsics
-        self.model = model
-        self.num_worlds = num_worlds
-
-        self.sensor = SensorTiledCamera(
-                model=model, num_cameras=NUM_CAMERAS,
-                width=intrinsics.width, height=intrinsics.height
-                )
-
-        self.camera_rays = self.sensor.compute_pinhole_camera_rays(intrinsics.fov_rad)
-
-        t = look_at_transform(intrinsics.eye, intrinsics.target, intrinsics.up)
-        self.camera_transforms = wp.array(
-                [[t] * self.num_worlds], dtype=wp.transformf, ndim=2
-                )
-
-        self.depth_image = self.sensor.create_depth_image_output()
-        self.points_gpu = wp.empty(
-                self.depth_image.shape,
-                dtype=wp.vec3f
-            )
-
-    def render(self, state):
-        raise NotImplementedError("Can not render on Camera")
-
-
-class SingleWorldCamera(Camera):
-    def __init__(self, intrinsics : CameraIntrinsics, model):
-        super().__init__(intrinsics, model, num_worlds=1)
-
-    def render(self, state):
-        return render_point_cloud(
-            self.sensor, state, self.camera_transforms, self.camera_rays,
-            self.depth_image, self.points_gpu,
-            self.intrinsics.height, self.intrinsics.width, self.intrinsics.max_depth,
-        )
-
-
-class MultiWorldCamera(Camera):
-    def __init__(self, intrinsics : CameraIntrinsics, model):
-        super().__init__(intrinsics, model, num_worlds=NUM_WORLDS)
-
-    def render(self, state):
-        return render_point_clouds_batch(
-            self.sensor, state, self.camera_transforms, self.camera_rays,
-            self.depth_image, self.points_gpu,
-            self.intrinsics.height, self.intrinsics.width, self.intrinsics.max_depth,
-            self.num_worlds,
-        )
-    
-def plot_target_scene(truth_json : str, save_dir : str):
-    with open(truth_json, 'r') as f:
-        truth = json.load(f)
-
-    labels = list(truth.keys())
-    positions = [truth[obj][:3] for obj in labels]
-
-    plt.figure(figsize=(8, 6))
-
-    for lab, pos in zip(labels, positions):
-        plt.scatter([pos[0]], [pos[1]], label=lab)
-
-
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.title("Target Scene")
-    plt.legend()
-    plt.savefig(f"{save_dir}/target_scene.png")
-    plt.close()
 
 def gen_point_cloud(scene_usd, intrinsics : CameraIntrinsics) -> jax.Array:
     # Build the scene
@@ -183,7 +91,7 @@ def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : Came
     model, objects = build_worlds(scene_usd, scene_makeup)
 
     # Step 3: Create Likelihood Function
-    multiCamera = MultiWorldCamera(intrinsics, model)
+    multiCamera = MultiWorldCamera(intrinsics, model, num_worlds=NUM_WORLDS)
     likelihoodf = ParallelPhysicsLikelihood(multiCamera, point_cloud, model)
 
     # Step 4: Insert Priors on Shapes
@@ -197,35 +105,41 @@ def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : Came
     sampler.initialize()
     sampler.gibb_sample(iterations=iterations)
 
+    # Step 6: Feed Correct Values
+    objects.assign_correct(truth_json)
+
     # Step 6: Generate Plots
     sampler.gen_plots(save_dir)
     objects.gen_plots(save_dir)
 
-    
-
     return scene, model, likelihoodf
 
-
-
-
-
-default_camera = CameraIntrinsics(width=640, height=480, fov_degree=60,)
+NUM_EPOCHS = 3
 
 if __name__ == "__main__":
+    import sys
+    from pathlib import Path
 
-    scene_usd = "scene002/data/scene002_physics.usdc"
-    priors = "scene002/data/scene002_priors.json"
-    truth_json = "scene002/data/scene002_truth.json"
+    # Accept scene name as argument, default to scene001
+    scene_name = sys.argv[1] if len(sys.argv) > 1 else "scene001"
 
-    folder = "scene002/results"
+    # Absolute path anchored to project root (three levels up from simulation/)
+    project_root = Path(__file__).resolve().parents[3]   # → Scene-Physics/
+    scene_dir = project_root / "resources" / "generated_scenes" / scene_name
 
-    makeup_json = "scene002/data/scene002_makeup.json"
+    scene_usd  = str(scene_dir / "data" / f"{scene_name}_physics.usdc")
+    priors     = str(scene_dir / "data" / f"{scene_name}_priors.json")
+    truth_json = str(scene_dir / "data" / f"{scene_name}_truth.json")
+    folder     = str(scene_dir / "results")
+
+    makeup_json = str(scene_dir / "data" / f"{scene_name}_makeup.json")
     with open(makeup_json) as f:
         mk = json.load(f)
+
     scene_makeup = Scene_Makeup(
         static=mk["static"],
         observed=mk["observed"],
         hidden=mk["hidden"],
     )
 
-    scene, model, x = run_importance_sampling(scene_usd, priors, truth_json, default_camera, scene_makeup, folder, 10)
+    scene, model, x = run_importance_sampling(scene_usd, priors, truth_json, default_camera, scene_makeup, folder, NUM_EPOCHS)

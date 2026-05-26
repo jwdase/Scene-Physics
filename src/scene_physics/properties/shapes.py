@@ -33,6 +33,8 @@ class Body:
         self.allocs = []
         self.num_worlds = num_worlds
 
+        self.correct = None
+
     def add(self, i):
         self.allocs.append(i)
 
@@ -89,6 +91,8 @@ class Dynamic(Body):
         self._plot_xy_position(save_dir)
 
     def _plot_xy_position(self, save_dir):
+        assert self.correct is not None, "Correct value must be assigned to generate plots"
+
         positions = np.array(self.plots)
         n, nw, size = positions.shape
 
@@ -98,6 +102,10 @@ class Dynamic(Body):
         fig, ax = plt.subplots()
         sc = ax.scatter(flat[:, 0], flat[:, 1], c=iters, cmap="viridis")
         fig.colorbar(sc, ax=ax, label="Iteration")
+
+        # Plot the correct position
+        ax.scatter(self.correct[0], self.correct[1], marker=(7, 1, 0), s=50, color='gold')
+
 
         ax.set_title(f"XY Position of {self.name}")
         ax.set_xlabel("X")
@@ -131,11 +139,24 @@ class Object_Collection:
         for i, (name, prior) in enumerate(priors.items()):
             self[name].set_proposer(children[i], prior, proposer)
 
+
+
+    def assign_correct(self, truth_json : str):
+        with open(truth_json, "r") as f:
+            truth = json.load(f)
+
+        for name, xform in truth.items():
+            if name in self.objects:
+                obj = self.objects[name]
+
+                obj.correct = np.array(xform)
+
     def initialize(self, scene):
         for obj in self.objects.values():
             if isinstance(obj, Dynamic) and obj.prior is not None:
                 scene = obj.initialize(scene)
-                self.dynamic.append(obj)
+                if isinstance(obj, Hidden):
+                    self.dynamic.append(obj)
 
         return scene
     
