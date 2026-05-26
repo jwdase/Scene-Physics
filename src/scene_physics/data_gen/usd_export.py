@@ -19,7 +19,7 @@ import re
 from dataclasses import dataclass
 
 import numpy as np
-from pxr import Usd, UsdGeom, UsdPhysics, Gf, Vt
+from pxr import Usd, UsdGeom, UsdPhysics, UsdShade, Gf, Sdf, Vt
 
 DEFAULT_MASS = 0.2
 
@@ -77,8 +77,67 @@ def _apply_physics(prim: Usd.Prim, body: UsdBody) -> None:
     mass_api.CreateMassAttr(float(body.mass))
 
 
-def write_layout_usd(path: str, bodies: list[UsdBody], *, gravity: float = 9.81) -> str:
-    """Write `bodies` to a Z-up physics USD at `path`; returns the path."""
+def _define_physics_material(
+    stage: Usd.Stage,
+    path: str,
+    *,
+    friction: float,
+    restitution: float,
+    rolling_friction: float | None = None,
+    torsional_friction: float | None = None,
+) -> UsdShade.Material:
+    """Define a UsdPhysics rigid-body material at `path` and return it.
+
+    Newton's `add_usd` reads `dynamicFriction` / `staticFriction` / `restitution` from the
+    standard UsdPhysics material, plus rolling/torsional friction from the Newton-specific
+    `newton:rollingFriction` / `newton:torsionalFriction` custom attributes (its default
+    SchemaResolverNewton). Leaving those two unset makes the importer fall back to its
+    defaults (0.0005 / 0.25) — exactly what scene_gen's *static* ShapeConfig leaves them at —
+    so a static collider can omit them and still round-trip.
+    """
+    material = UsdShade.Material.Define(stage, path)
+    prim = material.GetPrim()
+    UsdPhysics.MaterialAPI.Apply(prim)
+    api = UsdPhysics.MaterialAPI(prim)
+    api.CreateStaticFrictionAttr(float(friction))
+    api.CreateDynamicFrictionAttr(float(friction))
+    api.CreateRestitutionAttr(float(restitution))
+    if rolling_friction is not None:
+        prim.CreateAttribute("newton:rollingFriction", Sdf.ValueTypeNames.Float).Set(
+            float(rolling_friction)
+        )
+    if torsional_friction is not None:
+        prim.CreateAttribute("newton:torsionalFriction", Sdf.ValueTypeNames.Float).Set(
+            float(torsional_friction)
+        )
+    return material
+
+
+def _bind_physics_material(prim: Usd.Prim, material: UsdShade.Material) -> None:
+    """Bind `material` to `prim` for the physics purpose (the `material:binding:physics`
+    relationship Newton's importer reads)."""
+    binding = UsdShade.MaterialBindingAPI.Apply(prim)
+    binding.Bind(material, materialPurpose="physics")
+
+
+def write_layout_usd(
+    path: str,
+    bodies: list[UsdBody],
+    *,
+    gravity: float = 9.81,
+    friction: float = 0.8,
+    restitution: float = 0.0,
+    rolling_friction: float = 0.1,
+    torsional_friction: float = 0.1,
+) -> str:
+    """Write `bodies` to a Z-up physics USD at `path`; returns the path.
+
+    The friction / restitution arguments author a UsdPhysics material so the shapes'
+    contact properties round-trip through `add_usd` (otherwise reloaded shapes fall back to
+    Newton's defaults). Defaults mirror the dataset generator's dynamic ShapeConfig; the
+    static (table) material reuses `friction`/`restitution` and omits rolling/torsional so the
+    importer's defaults apply, matching the generator's static ShapeConfig.
+    """
     stage = Usd.Stage.CreateNew(str(path))
     UsdGeom.SetStageUpAxis(stage, UsdGeom.Tokens.z)
     UsdGeom.SetStageMetersPerUnit(stage, 1.0)
@@ -89,6 +148,16 @@ def write_layout_usd(path: str, bodies: list[UsdBody], *, gravity: float = 9.81)
     scene.CreateGravityDirectionAttr(Gf.Vec3f(0.0, 0.0, -1.0))
     scene.CreateGravityMagnitudeAttr(float(gravity))
 
+    dyn_material = _define_physics_material(
+        stage, "/root/PhysicsMaterialDynamic",
+        friction=friction, restitution=restitution,
+        rolling_friction=rolling_friction, torsional_friction=torsional_friction,
+    )
+    static_material = _define_physics_material(
+        stage, "/root/PhysicsMaterialStatic",
+        friction=friction, restitution=restitution,
+    )
+
     for body in bodies:
         prim = safe_usd_name(body.name)
         xform = UsdGeom.Xform.Define(stage, f"/root/{prim}")
@@ -98,6 +167,9 @@ def write_layout_usd(path: str, bodies: list[UsdBody], *, gravity: float = 9.81)
 
         mesh = _add_mesh_geometry(stage, f"/root/{prim}/{prim}", body)
         _apply_physics(mesh.GetPrim(), body)
+        _bind_physics_material(
+            mesh.GetPrim(), static_material if body.is_static else dyn_material
+        )
 
     stage.GetRootLayer().Save()
     return str(path)
