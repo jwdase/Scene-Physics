@@ -1,0 +1,49 @@
+"""
+Shared camera-perspective defaults.
+
+Single source of truth for the viewpoint + intrinsics used to render scenes: the
+dataset generator's occlusion/visibility checks (data_gen/scene_gen.py) and the
+sampling run's GT render + likelihood camera (simulation/sim_sampling.py) both
+pull `default_camera` from here, so a generated scene's occlusion gate and the
+downstream sampling render see the scene from the exact same viewpoint.
+
+Z-up convention: `eye` looks from -Y toward the origin; the table top is the XY
+plane. The Camera machinery (SensorTiledCamera wrappers) lives in sim_sampling.
+"""
+
+from dataclasses import dataclass, field
+
+import numpy as np
+
+# Viewpoint (Z-up): eye looks from -Y at the origin; table top is the XY plane.
+EYE = np.array([0.0, -1.5, 1.5])
+TARGET = np.zeros(3)
+UP = np.array([0, 0, 1])
+
+# Default intrinsics
+CAM_WIDTH = 640
+CAM_HEIGHT = 480
+CAM_FOV_DEGREE = 60
+CAM_MAX_DEPTH = 4.0
+
+
+@dataclass
+class CameraIntrinsics:
+    width: int
+    height: int
+    fov_degree: float
+    max_depth: float = CAM_MAX_DEPTH
+
+    eye: np.ndarray = field(default_factory=lambda: EYE)
+    target: np.ndarray = field(default_factory=lambda: TARGET)
+    up: np.ndarray = field(default_factory=lambda: UP)
+
+    @property
+    def fov_rad(self):
+        return np.radians(self.fov_degree)
+
+
+# The canonical perspective shared by dataset generation and the sampling run.
+default_camera = CameraIntrinsics(
+    width=CAM_WIDTH, height=CAM_HEIGHT, fov_degree=CAM_FOV_DEGREE
+)
