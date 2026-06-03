@@ -42,7 +42,8 @@ from scene_physics.data_gen.object_library import (
     sample_objects,
 )
 from scene_physics.data_gen.usd_export import UsdBody, write_layout_usd, safe_usd_name
-from scene_physics.simulation.sim_sampling import Camera, SingleWorldCamera, default_camera
+from scene_physics.visualization.camera import Camera, SingleWorldCamera
+from scene_physics.configs.camera import CameraIntrinsics, default_camera
 from scene_physics.kernels.image_process import render_point_clouds_batch
 
 # Physics / settling
