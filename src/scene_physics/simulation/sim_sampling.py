@@ -29,9 +29,10 @@ from scene_physics.sampling.importance import ImportanceSampler
 from scene_physics.configs.camera import CameraIntrinsics, default_camera
 from scene_physics.visualization.camera import SingleWorldCamera, MultiWorldCamera
 from scene_physics.utils.io import plot_target_scene
+from scene_physics.properties.shapes import Object_Collection, Hidden
 
 NUM_WORLDS = int(os.environ.get("NUM_WORLDS", 15))
-NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 50))
+NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 3))
 
 @dataclass
 class Experiment:
@@ -60,6 +61,23 @@ def gen_save_point_cloud(scene_usd, intrinsics : CameraIntrinsics, save_location
     save_point_cloud_ply(point_cloud, save_location)
 
     return point_cloud
+
+def build_final_world(scene_usd, object_collection : Object_Collection, save_dir : str):
+    builder = newton.ModelBuilder()
+    builder.add_ground_plane()
+    builder.add_usd(scene_usd, skip_mesh_approximation=True)
+
+    model = builder.finalize()
+
+    for i, body_name in enumerate(model.body_key):
+        assert body_name in object_collection.objects, f"Object {body_name} in USD not found in Object Collection"
+
+        # NOTE only set final location for occluded objects, since we assume perfect observation of visible objects
+        if isinstance(object_collection[body_name], Hidden):
+            model.body_q[i] = object_collection[body_name].get_final_location()
+
+    # TODO save used somehow in folder
+
 
 
 def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
@@ -100,7 +118,7 @@ def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : Came
 
     # Step 5: Initialize Importance Sampler
     scene = model.state()
-    sampler = ImportanceSampler(objects, likelihoodf, scene)
+    sampler = ImportanceSampler(objects, likelihoodf, scene, save_dir)
 
     # Step 5: Run Importance Sampling
     sampler.initialize()
@@ -120,7 +138,7 @@ if __name__ == "__main__":
     from pathlib import Path
 
     # Accept scene name as argument, default to scene001
-    scene_name = sys.argv[1] if len(sys.argv) > 1 else "scene001"
+    scene_name = sys.argv[1] if len(sys.argv) > 1 else "scene002"
 
     # Absolute path anchored to project root (three levels up from simulation/)
     project_root = Path(__file__).resolve().parents[3]   # → Scene-Physics/
