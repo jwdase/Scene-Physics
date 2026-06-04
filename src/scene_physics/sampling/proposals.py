@@ -3,6 +3,7 @@ Generates sampling for 6DoF for each object. It uses a scheduler and applies qua
 """
 
 import numpy as np
+import matplotlib.pyplot as plt
 from scipy.spatial.transform import Rotation
 
 
@@ -48,13 +49,19 @@ class Proposer:
     Proposer Class must be able to generate initial proposals
     and proposals after initial values
     """
-    def __init__(self, rand_seed, num_worlds, prior : Prior):
+    def __init__(self, rand_seed, num_worlds, prior : Prior, iterations : int):
         self.rng = np.random.default_rng(rand_seed)
         self.prior = prior
         self.num_worlds = num_worlds
+        self.iterations = iterations
 
         self._cur_pos_std = prior.init_std_pos
         self._cur_rot_std = prior.init_std_rot
+        self._cur_iteration = 0
+        
+        # Save for plotting
+        self._pos_std_list = []
+        self._rot_std_list = []
 
     def _gen_rotations(self, quat : np.array):
         n, _ = quat.shape
@@ -64,8 +71,16 @@ class Proposer:
         current = Rotation.from_quat(quat)
 
         return (perturbation * current).as_quat()
+    
+    def propose(self, _, __):
+        raise NotImplementedError("Propose must be implemented in child class")
 
     def _update(self):
+        self._pos_std_list.append(self._cur_pos_std)
+        self._rot_std_list.append(self._cur_rot_std)
+
+        # Update iteration and stds
+        self._cur_iteration += 1
         self._update_pos_std()
         self._update_rot_std()
 
@@ -80,7 +95,38 @@ class Proposer:
         proposals[:, 1] = np.clip(proposals[:, 1], a_min=self.prior.y_min, a_max=self.prior.y_max)
         return proposals
     
+    def gen_plots(self, path):
+        self._plot_pos_std(path)
+        self._plot_rot_std(path)
+
+    def _plot_pos_std(self, path):
+        import matplotlib.pyplot as plt
+
+        plt.figure()
+        plt.plot(self._pos_std_list)
+        plt.title("Position Std Dev Over Iterations")
+        plt.xlabel("Iteration")
+        plt.ylabel("Position Std Dev")
+        plt.grid()
+
+        plt.savefig(f"{path}/pos_std.png")
+    
+    def _plot_rot_std(self, path):
+
+        plt.figure()
+        plt.plot(self._rot_std_list)
+        plt.title("Rotation Std Dev Over Iterations")
+        plt.xlabel("Iteration")
+        plt.ylabel("Rotation Std Dev")
+        plt.grid()
+        plt.savefig(f"{path}/rot_std.png")
+
 class XYProposer(Proposer):
+    def __init__(self, rand_seed, num_worlds, prior, iterations):
+        super().__init__(rand_seed, num_worlds, prior, iterations)
+
+        self._cur_rot_std = 0.0  # No rotation for XYProposer
+
     def initial_proposal(self):
         np_xform = np.array(self.prior.xform)
         proposals = np.tile(np_xform, (self.num_worlds, 1))
@@ -149,3 +195,16 @@ class NoDecayProposal(XYProposer):
     def _update_rot_std(self):
         pass
 
+class ExpDecayProposal(XYProposer):
+    NUM_HALVING = 2
+
+    def __init__(self, rand_seed, num_worlds, prior, iterations):
+        super().__init__(rand_seed, num_worlds, prior, iterations)
+
+        self.multiplier = 0.5 ** (self.NUM_HALVING / self.iterations)
+
+    def _update_pos_std(self):
+        self._cur_pos_std *= self.multiplier
+    
+    def _update_rot_std(self):
+        self._cur_rot_std *= self.multiplier

@@ -57,9 +57,9 @@ class Dynamic(Body):
         self.plots = []
 
 
-    def set_proposer(self, rand_seed, prior_dict, proposer):
+    def set_proposer(self, rand_seed, prior_dict, proposer, iterations):
         self.prior = Prior(prior_dict)
-        self.proposer = proposer(rand_seed, self.num_worlds, self.prior)
+        self.proposer = proposer(rand_seed, self.num_worlds, self.prior, iterations)
 
     def initialize(self, scene):
         proposals = self._warp_to_numpy(scene)
@@ -89,6 +89,7 @@ class Dynamic(Body):
     
     def gen_plots(self, save_dir):
         self._plot_xy_position(save_dir)
+        self.proposer.gen_plots(save_dir)
 
     def _plot_xy_position(self, save_dir):
         assert self.correct is not None, "Correct value must be assigned to generate plots"
@@ -104,7 +105,7 @@ class Dynamic(Body):
         fig.colorbar(sc, ax=ax, label="Iteration")
 
         # Plot the correct position
-        ax.scatter(self.correct[0], self.correct[1], marker=(7, 1, 0), s=50, color='gold')
+        ax.scatter(self.correct[0], self.correct[1], marker=(7, 1, 0), s=50, color='red')
 
 
         ax.set_title(f"XY Position of {self.name}")
@@ -130,16 +131,14 @@ class Object_Collection:
     def finalize(self, model):
         for obj in self.objects.values(): obj.finalize(model)
 
-    def assign_priors(self, prior_json : str,  proposer : Proposer, rng : np.random.Generator):
+    def assign_priors(self, prior_json : str,  proposer : Proposer, iterations :int, rng : np.random.Generator):
         with open(prior_json, "r") as f:
             priors = json.load(f)
 
         children = rng.spawn(len(priors))
 
         for i, (name, prior) in enumerate(priors.items()):
-            self[name].set_proposer(children[i], prior, proposer)
-
-
+            self[name].set_proposer(children[i], prior, proposer, iterations)
 
     def assign_correct(self, truth_json : str):
         with open(truth_json, "r") as f:
@@ -153,10 +152,11 @@ class Object_Collection:
 
     def initialize(self, scene):
         for obj in self.objects.values():
-            if isinstance(obj, Dynamic) and obj.prior is not None:
+
+            # NOTE only samples for occluded object
+            if isinstance(obj, Hidden):
                 scene = obj.initialize(scene)
-                if isinstance(obj, Hidden):
-                    self.dynamic.append(obj)
+                self.dynamic.append(obj)
 
         return scene
     

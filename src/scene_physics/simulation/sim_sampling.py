@@ -24,13 +24,14 @@ from scene_physics.properties.shapes import (
 )
 
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
-from scene_physics.sampling.proposals import NoDecayProposal
+from scene_physics.sampling.proposals import ExpDecayProposal
 from scene_physics.sampling.importance import ImportanceSampler
 from scene_physics.configs.camera import CameraIntrinsics, default_camera
 from scene_physics.visualization.camera import SingleWorldCamera, MultiWorldCamera
 from scene_physics.utils.io import plot_target_scene
 
 NUM_WORLDS = int(os.environ.get("NUM_WORLDS", 15))
+NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 50))
 
 @dataclass
 class Experiment:
@@ -95,7 +96,7 @@ def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : Came
     likelihoodf = ParallelPhysicsLikelihood(multiCamera, point_cloud, model)
 
     # Step 4: Insert Priors on Shapes
-    objects.assign_priors(prior_json, NoDecayProposal, base_rng)
+    objects.assign_priors(prior_json, ExpDecayProposal, iterations, base_rng)
 
     # Step 5: Initialize Importance Sampler
     scene = model.state()
@@ -114,8 +115,6 @@ def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : Came
 
     return scene, model, likelihoodf
 
-NUM_EPOCHS = 3
-
 if __name__ == "__main__":
     import sys
     from pathlib import Path
@@ -128,7 +127,7 @@ if __name__ == "__main__":
     scene_dir = project_root / "resources" / "generated_scenes" / scene_name
 
     scene_usd  = str(scene_dir / "data" / f"{scene_name}_physics.usdc")
-    priors     = str(scene_dir / "data" / f"{scene_name}_priors.json")
+    priors     = str(scene_dir / "data" / f"{scene_name}_modified_priors.json")
     truth_json = str(scene_dir / "data" / f"{scene_name}_truth.json")
     folder     = str(scene_dir / "results")
 
