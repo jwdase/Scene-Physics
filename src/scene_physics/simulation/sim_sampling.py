@@ -1,36 +1,20 @@
 import json
-import os       
+import os
+from dataclasses import dataclass       
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"] = "false"
 
 import newton
-import warp as wp
-import jax 
-import jax.numpy as jnp
-import matplotlib.pyplot as plt
-
-from newton._src.sensors.sensor_tiled_camera import SensorTiledCamera
-from scene_physics.visualization.camera import look_at_transform
-from scene_physics.kernels.image_process import (
-    render_point_cloud,
-    render_point_clouds_batch,
-)
-from scene_physics.utils.io import save_point_cloud_ply
-from dataclasses import dataclass, field
 import numpy as np
 
-from scene_physics.properties.shapes import (
-    Scene_Makeup,
-    object_collection
-)
-
+from scene_physics.utils.plots import gen_save_point_cloud, build_final_world, plot_target_scene
+from scene_physics.properties.structs import Scene_Makeup, object_collection
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
-from scene_physics.sampling.proposals import ExpDecayProposal
 from scene_physics.sampling.importance import ImportanceSampler
 from scene_physics.configs.camera import CameraIntrinsics, default_camera
-from scene_physics.visualization.camera import SingleWorldCamera, MultiWorldCamera
-from scene_physics.utils.io import plot_target_scene
-from scene_physics.properties.shapes import Object_Collection, Hidden
-from scene_physics.data_gen.usd_repose import repose_usd
+from scene_physics.visualization.camera import MultiWorldCamera
+
+# Sampler we get to choose
+from scene_physics.sampling.proposals import ExpDecayProposal
 
 NUM_WORLDS = int(os.environ.get("NUM_WORLDS", 15))
 NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 50))
@@ -39,42 +23,6 @@ NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 50))
 class Experiment:
     iterations : int
     decay_method : str
-
-
-def gen_point_cloud(scene_usd, intrinsics : CameraIntrinsics) -> jax.Array:
-    # Build the scene
-    builder = newton.ModelBuilder()
-    builder.add_ground_plane()
-    builder.add_usd(scene_usd, skip_mesh_approximation=True)
-    
-    # Create the model and render
-    model = builder.finalize()
-    renderer = SingleWorldCamera(intrinsics, model)
-
-    # Generate the state and make point cloud
-    state = model.state()
-    pc = renderer.render(state)
-
-    return jnp.array(pc)    # Deallocated from warp/Newton
-
-def gen_save_point_cloud(scene_usd, intrinsics : CameraIntrinsics, save_location):
-    point_cloud = gen_point_cloud(scene_usd, intrinsics)
-    save_point_cloud_ply(point_cloud, save_location)
-
-    return point_cloud
-
-def build_final_world(scene_usd, object_collection : Object_Collection, save_dir : str):
-    # NOTE: Location update only for hidden objects
-
-    new_positions = {
-        obj.name : obj.get_final_location() 
-        for obj in object_collection.objects.values() 
-        if isinstance(obj, Hidden)
-    }
-
-    out_path = f"{save_dir}/final_world.usdc"
-
-    repose_usd(scene_usd, new_positions, out_path)
 
 
 def build_worlds(scene_usd, scene_makeup : Scene_Makeup):

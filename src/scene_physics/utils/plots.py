@@ -1,7 +1,17 @@
+import json
+
 import numpy as np
 import pyvista as pv
 import matplotlib.pyplot as plt
-import json
+import newton
+import jax
+import jax.numpy as jnp
+
+from scene_physics.properties.structs import Object_Collection
+from scene_physics.configs.camera import CameraIntrinsics
+from scene_physics.visualization.camera import SingleWorldCamera
+from scene_physics.data_gen.usd_repose import repose_usd
+from scene_physics.properties.shapes import *
 
 # Plot point cloud
 def plot_point_maps(point_cloud, location):
@@ -57,3 +67,39 @@ def plot_target_scene(truth_json : str, save_dir : str):
     plt.legend()
     plt.savefig(f"{save_dir}/target_scene.png")
     plt.close()
+
+
+def gen_point_cloud(scene_usd, intrinsics : CameraIntrinsics) -> jax.Array:
+    # Build the scene
+    builder = newton.ModelBuilder()
+    builder.add_ground_plane()
+    builder.add_usd(scene_usd, skip_mesh_approximation=True)
+    
+    # Create the model and render
+    model = builder.finalize()
+    renderer = SingleWorldCamera(intrinsics, model)
+
+    # Generate the state and make point cloud
+    state = model.state()
+    pc = renderer.render(state)
+
+    return jnp.array(pc)    # Deallocated from warp/Newton
+
+def gen_save_point_cloud(scene_usd, intrinsics : CameraIntrinsics, save_location):
+    point_cloud = gen_point_cloud(scene_usd, intrinsics)
+    save_point_cloud_ply(point_cloud, save_location)
+
+    return point_cloud
+
+def build_final_world(scene_usd, object_collection : Object_Collection, save_dir : str):
+    # NOTE: Location update only for hidden objects
+
+    new_positions = {
+        obj.name : obj.get_final_location() 
+        for obj in object_collection.objects.values() 
+        if isinstance(obj, Hidden)
+    }
+
+    out_path = f"{save_dir}/final_world.usdc"
+
+    repose_usd(scene_usd, new_positions, out_path)

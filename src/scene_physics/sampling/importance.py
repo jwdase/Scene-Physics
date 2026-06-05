@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 
-from scene_physics.properties.shapes import Object_Collection
+from scene_physics.properties.structs import Object_Collection
 from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
 
 
