@@ -24,6 +24,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from material_specs import DEFAULT as _DEFAULT  # noqa: E402
 from material_specs import MATERIAL_SPECS  # noqa: E402
 
+# Global gain on bump strength so procedural relief actually reads under the soft
+# studio lighting. Per-material albedo/roughness/contrast knobs have defaults below.
+BUMP_GAIN = 2.5
+
 
 def _set(bsdf, names, value) -> None:
     for n in names:
@@ -54,6 +58,12 @@ def build_material(name: str, spec: dict) -> bpy.types.Material:
     bump = spec.get("bump")
     if bump:
         kind, scale, strength = bump
+        base = spec.get("base_color", _DEFAULT["base_color"])
+        rough = spec.get("roughness", 0.5)
+        contrast = spec.get("tex_contrast", 0.5)  # 0..1, pattern sharpness
+        albedo_var = spec.get("albedo_var", 0.55)  # how much darker the valleys get
+        rough_var = spec.get("rough_var", 0.18)  # +/- roughness across the pattern
+
         texco = nt.nodes.new("ShaderNodeTexCoord")
         if kind == "wood":
             tex = nt.nodes.new("ShaderNodeTexWave")
@@ -66,10 +76,31 @@ def build_material(name: str, spec: dict) -> bpy.types.Material:
             tex = nt.nodes.new("ShaderNodeTexNoise")
             tex.inputs["Scale"].default_value = scale
         nt.links.new(texco.outputs["Generated"], tex.inputs["Vector"])
+        fac = tex.outputs["Fac"] if "Fac" in tex.outputs else tex.outputs[0]
+
+        # Albedo contrast: darken the pattern's valleys. The ColorRamp stops double
+        # as a contrast knob -- the closer together, the punchier the transition.
+        ramp = nt.nodes.new("ShaderNodeValToRGB")
+        cr = ramp.color_ramp
+        half = 0.5 * (1.0 - contrast)
+        cr.elements[0].position = max(0.0, 0.5 - half)
+        cr.elements[1].position = min(1.0, 0.5 + half + 1e-3)
+        cr.elements[0].color = (*(c * (1.0 - albedo_var) for c in base[:3]), 1.0)
+        cr.elements[1].color = (base[0], base[1], base[2], 1.0)
+        nt.links.new(fac, ramp.inputs["Fac"])
+        nt.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+
+        # Roughness variation: gloss differs across peaks/valleys -> specular contrast.
+        mr = nt.nodes.new("ShaderNodeMapRange")
+        mr.inputs["To Min"].default_value = max(0.0, rough - rough_var)
+        mr.inputs["To Max"].default_value = min(1.0, rough + rough_var)
+        nt.links.new(fac, mr.inputs["Value"])
+        nt.links.new(mr.outputs["Result"], bsdf.inputs["Roughness"])
+
+        # Stronger relief so the texture is visible under flat light.
         bumpn = nt.nodes.new("ShaderNodeBump")
-        bumpn.inputs["Strength"].default_value = strength
-        height = tex.outputs["Fac"] if "Fac" in tex.outputs else tex.outputs[0]
-        nt.links.new(height, bumpn.inputs["Height"])
+        bumpn.inputs["Strength"].default_value = min(1.0, strength * BUMP_GAIN)
+        nt.links.new(fac, bumpn.inputs["Height"])
         nt.links.new(bumpn.outputs["Normal"], bsdf.inputs["Normal"])
 
     return mat
