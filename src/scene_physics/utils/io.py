@@ -48,7 +48,7 @@ def plot_target_scene(truth_json : str, save_dir : str):
     positions = [truth[obj][:3] for obj in labels]
 
     for lab, pos in zip(labels, positions):
-        plt.scatter([pos[0]], [pos[1]], label=lab)
+        plt.scatter([pos[0]], [pos[1]], label=lab, alpha=0.6)
 
 
     plt.xlabel("X")

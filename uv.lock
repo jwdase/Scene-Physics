@@ -2988,6 +2988,7 @@ source = { editable = "." }
 dependencies = [
     { name = "imageio-ffmpeg" },
     { name = "imgui-bundle" },
+    { name = "ipykernel" },
     { name = "jax", extra = ["cuda12"] },
     { name = "newton" },
     { name = "pyglet" },
@@ -3008,6 +3009,7 @@ dev = [
 requires-dist = [
     { name = "imageio-ffmpeg", specifier = ">=0.6.0,<0.7.0" },
     { name = "imgui-bundle", specifier = ">=1.92.801" },
+    { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "jax", extras = ["cuda12"], specifier = ">=0.9.0" },
     { name = "newton", editable = "src/newton" },
     { name = "pyglet", specifier = ">=2.0" },

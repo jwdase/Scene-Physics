@@ -56,6 +56,9 @@ class Dynamic(Body):
         self.prior = None
         self.plots = []
 
+        # Best score: (-inf, None) → (likelihood, value)
+        self.best = (-np.inf, None)
+
 
     def set_proposer(self, rand_seed, prior_dict, proposer, iterations):
         self.prior = Prior(prior_dict)
@@ -73,6 +76,10 @@ class Dynamic(Body):
 
         # Index Position, Likelihood, Then propose
         positions, likelihoods = proposals[self.allocs], likelihood
+
+        # Save the highest likelihood
+        self._update_best(likelihoods, positions)
+
         proposals[self.allocs] = self.proposer.propose(positions, likelihoods)
 
         # Save a copy of highest likelihood location (allocs[0] = best world's body)
@@ -80,6 +87,17 @@ class Dynamic(Body):
 
         scene.body_q = self._numpy_to_warp(proposals)
         return scene
+    
+    def _update_best(self, likelihood, positions):
+        max_likelihood = likelihood.max()
+        max_index = likelihood.argmax()
+
+        if max_likelihood > self.best[0]:
+            self.best = (max_likelihood, positions[max_index])
+
+    
+    def get_final_location(self):
+        return self.best[1]
     
     def _warp_to_numpy(self, state):
         return state.body_q.numpy()
@@ -90,6 +108,17 @@ class Dynamic(Body):
     def gen_plots(self, save_dir):
         self._plot_xy_position(save_dir)
         self.proposer.gen_plots(save_dir)
+        self._save_positions(save_dir)
+        self._save_best(save_dir)
+
+    def _save_positions(self, save_dir):
+        positions = np.array(self.plots)
+        np.save(f"{save_dir}/{self.name}_positions.npy", positions)
+
+    def _save_best(self, save_dir):
+        with open(f"{save_dir}/{self.name}_best.txt", 'w') as f:
+            f.write(f"Best Likelihood: {self.best[0]}\n")
+            f.write(f"Best Position: {self.best[1]}\n")
 
     def _plot_xy_position(self, save_dir):
         assert self.correct is not None, "Correct value must be assigned to generate plots"

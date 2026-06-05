@@ -7,6 +7,7 @@ from scene_physics.data_gen.object_library import (
     sample_objects,
 )
 from scene_physics.data_gen.usd_export import UsdBody, safe_usd_name, write_layout_usd
+from scene_physics.data_gen.usd_repose import repose_usd
 from scene_physics.data_gen.scene_gen import (
     SceneResult,
     SceneSpec,
@@ -23,6 +24,7 @@ __all__ = [
     "UsdBody",
     "safe_usd_name",
     "write_layout_usd",
+    "repose_usd",
     "SceneResult",
     "SceneSpec",
     "generate_dataset",

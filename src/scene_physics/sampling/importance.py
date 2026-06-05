@@ -6,13 +6,19 @@ from scene_physics.likelihood.likelihoods import ParallelPhysicsLikelihood
 
 
 class ImportanceSampler:
-    def __init__(self, objects : Object_Collection, likelihood_fn : ParallelPhysicsLikelihood, state):
+    def __init__(self, objects : Object_Collection, likelihood_fn : ParallelPhysicsLikelihood, state, save_dir : str):
         self.objects = objects
         self.likelihood_fn = likelihood_fn
         self.state = state
 
         # Values Saved throughout sampling
         self.likelihood = []
+
+        # Generate sampling.txt
+        self.sampling_path = f"{save_dir}/sampling.txt"
+
+        with open(self.sampling_path, 'w') as f:
+            f.write("Iteration,Object,Likelihood\n")
 
     def initialize(self):
         """ Initialize world from priors"""
@@ -40,6 +46,9 @@ class ImportanceSampler:
 
             self.likelihood.append(likelihood)
             print(f"Iteration {i}, Likelihood: {likelihood.max()}")
+
+            with open(self.sampling_path, 'a') as f:
+                f.write(f"{i},{obj.name},{likelihood.max()}\n")
 
 
     def gen_plots(self, save_dir):

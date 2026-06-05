@@ -30,9 +30,10 @@ from scene_physics.configs.camera import CameraIntrinsics, default_camera
 from scene_physics.visualization.camera import SingleWorldCamera, MultiWorldCamera
 from scene_physics.utils.io import plot_target_scene
 from scene_physics.properties.shapes import Object_Collection, Hidden
+from scene_physics.data_gen.usd_repose import repose_usd
 
 NUM_WORLDS = int(os.environ.get("NUM_WORLDS", 15))
-NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 3))
+NUM_EPOCHS = int(os.environ.get("NUM_EPOCHS", 50))
 
 @dataclass
 class Experiment:
@@ -63,21 +64,17 @@ def gen_save_point_cloud(scene_usd, intrinsics : CameraIntrinsics, save_location
     return point_cloud
 
 def build_final_world(scene_usd, object_collection : Object_Collection, save_dir : str):
-    builder = newton.ModelBuilder()
-    builder.add_ground_plane()
-    builder.add_usd(scene_usd, skip_mesh_approximation=True)
+    # NOTE: Location update only for hidden objects
 
-    model = builder.finalize()
+    new_positions = {
+        obj.name : obj.get_final_location() 
+        for obj in object_collection.objects.values() 
+        if isinstance(obj, Hidden)
+    }
 
-    for i, body_name in enumerate(model.body_key):
-        assert body_name in object_collection.objects, f"Object {body_name} in USD not found in Object Collection"
+    out_path = f"{save_dir}/final_world.usdc"
 
-        # NOTE only set final location for occluded objects, since we assume perfect observation of visible objects
-        if isinstance(object_collection[body_name], Hidden):
-            model.body_q[i] = object_collection[body_name].get_final_location()
-
-    # TODO save used somehow in folder
-
+    repose_usd(scene_usd, new_positions, out_path)
 
 
 def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
@@ -127,9 +124,12 @@ def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : Came
     # Step 6: Feed Correct Values
     objects.assign_correct(truth_json)
 
-    # Step 6: Generate Plots
+    # Step 7: Generate Plots
     sampler.gen_plots(save_dir)
     objects.gen_plots(save_dir)
+
+    # Step 8: Build Final World and Save
+    build_final_world(scene_usd, objects, save_dir)
 
     return scene, model, likelihoodf
 
