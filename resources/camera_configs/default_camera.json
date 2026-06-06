@@ -1,0 +1,23 @@
+{
+  "name": "default_old",
+  "description": "Original default_camera: eye=(0,-1.5,1.5), looks at origin, 60 deg vertical FOV",
+  "width": 640,
+  "height": 480,
+  "fov_degree": 60.0,
+  "max_depth": 4.0,
+  "eye": [
+    0.0,
+    -1.5,
+    1.5
+  ],
+  "target": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "up": [
+    0.0,
+    0.0,
+    1.0
+  ]
+}

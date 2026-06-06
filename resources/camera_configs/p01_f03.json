@@ -1,0 +1,28 @@
+{
+  "id": "p01_f03",
+  "position": {
+    "index": 1,
+    "desc": "eye-level front",
+    "azimuth_deg": 0,
+    "elevation_deg": 12,
+    "distance_m": 1.7
+  },
+  "fov_degree": 34,
+  "width": 640,
+  "height": 480,
+  "eye": [
+    0.0,
+    -1.6628509212474696,
+    1.1534498743901909
+  ],
+  "target": [
+    0.0,
+    0.0,
+    0.8
+  ],
+  "up": [
+    0.0,
+    0.0,
+    1.0
+  ]
+}
