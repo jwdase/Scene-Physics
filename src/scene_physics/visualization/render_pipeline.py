@@ -18,7 +18,8 @@ from pathlib import Path
 
 import numpy as np
 
-from scene_physics.configs.camera import CameraIntrinsics, default_camera
+from scene_physics.configs.camera import (CameraIntrinsics, default_camera,
+                                          load_camera_config)
 from scene_physics.visualization import blender_runner, segmentation
 from scene_physics.visualization.blender_runner import intrinsics_to_dict
 
@@ -293,7 +294,16 @@ def main() -> None:
     ap.add_argument("--device", default="GPU", choices=["GPU", "CPU"])
     ap.add_argument("--hdri", default=str(DEFAULT_HDRI))
     ap.add_argument("--view-transform", default="AgX")
+    ap.add_argument(
+        "--camera-config",
+        help="path to a camera-layout JSON (e.g. a fov_grid option or default_camera) "
+        "to use as the viewpoint; defaults to default_camera",
+    )
     args = ap.parse_args()
+
+    intr = (
+        load_camera_config(args.camera_config) if args.camera_config else default_camera
+    )
 
     if args.all:
         dirs = sorted(p for p in SCENES_ROOT.glob("scene*") if p.is_dir())
@@ -306,6 +316,7 @@ def main() -> None:
         print(f"[render] {d.name} ...")
         out = render_scene(
             d,
+            intr=intr,
             samples=args.samples,
             device=args.device,
             hdri=args.hdri,
