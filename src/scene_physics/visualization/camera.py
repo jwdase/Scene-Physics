@@ -73,29 +73,6 @@ class MultiWorldCamera(Camera):
         )
 
 
-def setup_depth_camera(model, eye, target, width, height, num_worlds, fov_degrees):
-    """Sets up the sensor tiled camera for use"""
-    sensor = SensorTiledCamera(model=model, num_cameras=1, width=width, height=height)
-
-    # Setup camera Defaults
-    fov_radians = np.radians(fov_degrees)
-    camera_rays = sensor.compute_pinhole_camera_rays(fov_radians)
-
-    # Need one camera per world
-    camera_transform = look_at_transform(eye, target)
-    camera_transforms = wp.array(
-        [[camera_transform] * num_worlds],
-        dtype=wp.transformf,
-        ndim=2,
-    )
-
-    return {
-        "sensor": sensor,
-        "camera_rays": camera_rays,
-        "camera_transforms": camera_transforms,
-    }
-
-
 def look_at_transform(eye, target, up=np.array([0.0, 1.0, 0.0])):
     """Creates a wp.transformf that places the camera at 'eye' looking at 'target'.
 

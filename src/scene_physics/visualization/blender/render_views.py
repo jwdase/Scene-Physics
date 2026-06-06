@@ -31,7 +31,7 @@ from render_scene import (  # noqa: E402
 
 
 def main() -> None:
-    argv = sys.argv[sys.argv.index("--") + 1:]
+    argv = sys.argv[sys.argv.index("--") + 1 :]
     with open(argv[0]) as f:
         job = json.load(f)
 
