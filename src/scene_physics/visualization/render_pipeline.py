@@ -21,7 +21,7 @@ from scene_physics.visualization.blender_runner import intrinsics_to_dict
 
 ROOT = Path(__file__).resolve().parents[3]
 SCENES_ROOT = ROOT / "resources" / "generated_scenes"
-DEFAULT_HDRI = ROOT / "resources" / "hdri" / "studio_small_08_2k.hdr"
+DEFAULT_HDRI = ROOT / "resources" / "hdri" / "lythwood_room_4k.hdr"
 
 
 def scene_names(scene_dir: Path) -> list[str]:
@@ -36,7 +36,8 @@ def render_scene(
     hdri: str | Path = DEFAULT_HDRI,
     samples: int = 128,
     device: str = "GPU",
-    world_strength: float = 0.5,
+    world_strength: float = 1.0,
+    hdri_rotation: float = 0.0,
     view_transform: str = "AgX",
     out_dir: str | Path | None = None,
 ) -> Path:
@@ -55,6 +56,7 @@ def render_scene(
         "samples": samples,
         "device": device,
         "world_strength": world_strength,
+        "hdri_rotation": hdri_rotation,
         "view_transform": view_transform,
     }
     blender_runner.run_render_scene(job)

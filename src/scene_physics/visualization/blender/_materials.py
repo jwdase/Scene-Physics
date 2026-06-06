@@ -15,6 +15,7 @@ bpy + stdlib only.
 
 from __future__ import annotations
 
+import math
 import os
 import sys
 
@@ -28,6 +29,20 @@ from material_specs import MATERIAL_SPECS  # noqa: E402
 # studio lighting. Per-material albedo/roughness/contrast knobs have defaults below.
 BUMP_GAIN = 2.5
 
+# Real CC0 PBR texture sets live here (repo/resources/textures/<set>/). Resolved
+# relative to this file so it works regardless of cwd / worktree.
+_TEX_ROOT = os.path.normpath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..",
+        "..",
+        "..",
+        "..",
+        "resources",
+        "textures",
+    )
+)
+
 
 def _set(bsdf, names, value) -> None:
     for n in names:
@@ -36,7 +51,72 @@ def _set(bsdf, names, value) -> None:
             return
 
 
+def _box_image(nt, mapping, path, non_color, blend):
+    """An Image Texture node BOX-projected (triplanar) -- needs no UVs."""
+    node = nt.nodes.new("ShaderNodeTexImage")
+    node.image = bpy.data.images.load(path)
+    node.projection = "BOX"
+    node.projection_blend = blend
+    if non_color:
+        node.image.colorspace_settings.name = "Non-Color"
+    nt.links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+    return node
+
+
+def build_textured_material(tex: dict) -> bpy.types.Material:
+    """Real PBR maps (Color/Roughness/Displacement) box-projected onto a UV-less
+    mesh. tex = {"set","prefix","scale","blend","bump","coat"}. Displacement drives
+    a Bump (not a tangent-space normal map, which is unreliable without UVs)."""
+    folder = os.path.join(_TEX_ROOT, tex["set"])
+    prefix = tex["prefix"]
+    blend = tex.get("blend", 0.3)
+    s = tex.get("scale", 1.0)
+
+    mat = bpy.data.materials.new(f"tex_{tex['set']}")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+    bsdf = nt.nodes.new("ShaderNodeBsdfPrincipled")
+    nt.links.new(bsdf.outputs["BSDF"], out.inputs["Surface"])
+
+    texco = nt.nodes.new("ShaderNodeTexCoord")
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Scale"].default_value = (s, s, s)
+    nt.links.new(texco.outputs["Object"], mapping.inputs["Vector"])  # real-world scale
+
+    col = _box_image(
+        nt, mapping, os.path.join(folder, f"{prefix}_Color.jpg"), False, blend
+    )
+    gamma = tex.get(
+        "gamma", 1.0
+    )  # <1 lightens (e.g. recolor a dark tile to light gray)
+    if gamma != 1.0:
+        g = nt.nodes.new("ShaderNodeGamma")
+        g.inputs["Gamma"].default_value = gamma
+        nt.links.new(col.outputs["Color"], g.inputs["Color"])
+        nt.links.new(g.outputs["Color"], bsdf.inputs["Base Color"])
+    else:
+        nt.links.new(col.outputs["Color"], bsdf.inputs["Base Color"])
+    rough = _box_image(
+        nt, mapping, os.path.join(folder, f"{prefix}_Roughness.jpg"), True, blend
+    )
+    nt.links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
+    disp = _box_image(
+        nt, mapping, os.path.join(folder, f"{prefix}_Displacement.jpg"), True, blend
+    )
+    bumpn = nt.nodes.new("ShaderNodeBump")
+    bumpn.inputs["Strength"].default_value = tex.get("bump", 0.4)
+    nt.links.new(disp.outputs["Color"], bumpn.inputs["Height"])
+    nt.links.new(bumpn.outputs["Normal"], bsdf.inputs["Normal"])
+    _set(bsdf, ["Coat Weight", "Clearcoat"], tex.get("coat", 0.0))
+    return mat
+
+
 def build_material(name: str, spec: dict) -> bpy.types.Material:
+    if spec.get("textures"):
+        return build_textured_material(spec["textures"])
+
     mat = bpy.data.materials.new(name=f"mat_{name}")
     mat.use_nodes = True
     nt = mat.node_tree
@@ -65,17 +145,28 @@ def build_material(name: str, spec: dict) -> bpy.types.Material:
         rough_var = spec.get("rough_var", 0.18)  # +/- roughness across the pattern
 
         texco = nt.nodes.new("ShaderNodeTexCoord")
+        coord = texco.outputs["Generated"]
         if kind == "wood":
-            tex = nt.nodes.new("ShaderNodeTexWave")
+            # Natural wood grain without UVs: stretch the coords hard along the grain
+            # direction so a fractal noise reads as long wavy streaks, not bands.
+            mapping = nt.nodes.new("ShaderNodeMapping")
+            aniso = spec.get("wood_aniso", 0.12)  # lower = longer streaks
+            mapping.inputs["Scale"].default_value = (1.0, aniso, 1.0)
+            nt.links.new(coord, mapping.inputs["Vector"])
+            tex = nt.nodes.new("ShaderNodeTexNoise")
             tex.inputs["Scale"].default_value = scale
-            tex.inputs["Distortion"].default_value = 2.0
+            tex.inputs["Detail"].default_value = 5.0
+            tex.inputs["Roughness"].default_value = 0.6
+            nt.links.new(mapping.outputs["Vector"], tex.inputs["Vector"])
         elif kind == "voronoi":
             tex = nt.nodes.new("ShaderNodeTexVoronoi")
             tex.inputs["Scale"].default_value = scale
+            nt.links.new(coord, tex.inputs["Vector"])
         else:
             tex = nt.nodes.new("ShaderNodeTexNoise")
             tex.inputs["Scale"].default_value = scale
-        nt.links.new(texco.outputs["Generated"], tex.inputs["Vector"])
+            tex.inputs["Detail"].default_value = 4.0
+            nt.links.new(coord, tex.inputs["Vector"])
         fac = tex.outputs["Fac"] if "Fac" in tex.outputs else tex.outputs[0]
 
         # Albedo contrast: darken the pattern's valleys. The ColorRamp stops double
@@ -117,7 +208,9 @@ def assign_material(obj: bpy.types.Object, name: str) -> None:
     obj.data.materials.append(mat)
 
 
-def setup_world_hdri(hdri_path: str, strength: float = 1.0) -> None:
+def setup_world_hdri(
+    hdri_path: str, strength: float = 1.0, rotation_deg: float = 0.0
+) -> None:
     scene = bpy.context.scene
     world = scene.world or bpy.data.worlds.new("StudioWorld")
     scene.world = world
@@ -129,5 +222,12 @@ def setup_world_hdri(hdri_path: str, strength: float = 1.0) -> None:
     env = nt.nodes.new("ShaderNodeTexEnvironment")
     env.image = bpy.data.images.load(hdri_path)
     bg.inputs["Strength"].default_value = strength
+
+    # Rotation control so the nicest part of the room sits behind the table.
+    texco = nt.nodes.new("ShaderNodeTexCoord")
+    mapping = nt.nodes.new("ShaderNodeMapping")
+    mapping.inputs["Rotation"].default_value = (0.0, 0.0, math.radians(rotation_deg))
+    nt.links.new(texco.outputs["Generated"], mapping.inputs["Vector"])
+    nt.links.new(mapping.outputs["Vector"], env.inputs["Vector"])
     nt.links.new(env.outputs["Color"], bg.inputs["Color"])
     nt.links.new(bg.outputs["Background"], out.inputs["Surface"])

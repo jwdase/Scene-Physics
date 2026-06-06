@@ -16,10 +16,13 @@ DEFAULT = {"base_color": (0.6, 0.6, 0.6, 1.0), "roughness": 0.5}
 MATERIAL_SPECS: dict[str, dict] = {
     # --- furniture / wood ---
     "dining_room_table": {
-        "base_color": (0.17, 0.085, 0.04, 1),
-        "roughness": 0.35,
-        "spec": 0.5,
-        "bump": ("wood", 5.0, 0.20),
+        "textures": {
+            "set": "Wood063",
+            "prefix": "Wood063_4K-JPG",
+            "scale": 1.2,
+            "bump": 0.45,
+            "coat": 0.25,  # satin finish
+        }
     },
     "square_wood_block": {
         "base_color": (0.55, 0.38, 0.20, 1),
@@ -37,13 +40,14 @@ MATERIAL_SPECS: dict[str, dict] = {
         "bump": ("noise", 40.0, 0.20),
     },  # cork
     # --- ceramics / glossy dielectrics ---
-    "jug04": {"base_color": (0.85, 0.82, 0.75, 1), "roughness": 0.15},
-    "vase_05": {"base_color": (0.80, 0.80, 0.83, 1), "roughness": 0.12},
-    "coffeemug": {"base_color": (0.90, 0.90, 0.92, 1), "roughness": 0.12},
+    "jug04": {"base_color": (0.85, 0.82, 0.75, 1), "roughness": 0.18, "coat": 0.4},
+    "vase_05": {"base_color": (0.80, 0.80, 0.83, 1), "roughness": 0.14, "coat": 0.4},
+    "coffeemug": {"base_color": (0.90, 0.90, 0.92, 1), "roughness": 0.14, "coat": 0.4},
     "int_kitchen_accessories_le_creuset_bowl_30cm": {
         "base_color": (0.74, 0.12, 0.05, 1),
-        "roughness": 0.08,
-    },  # enameled red
+        "roughness": 0.10,
+        "coat": 0.5,
+    },  # enameled red, glossy glaze
     # --- glass / metal ---
     "glass1": {
         "base_color": (1, 1, 1, 1),

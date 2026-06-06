@@ -6,8 +6,10 @@ from scipy.spatial.transform import Rotation
 
 from newton._src.sensors.sensor_tiled_camera import SensorTiledCamera
 from scene_physics.configs.camera import CameraIntrinsics
-from scene_physics.kernels.image_process import (render_point_cloud,
-                                                 render_point_clouds_batch)
+from scene_physics.kernels.image_process import (
+    render_point_cloud,
+    render_point_clouds_batch,
+)
 
 
 class Camera:

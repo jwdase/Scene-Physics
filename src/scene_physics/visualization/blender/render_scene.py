@@ -116,7 +116,9 @@ def main() -> None:
     # Environment: HDRI for soft fill + reflections, a studio area-light rig for
     # shaping/shadows, and a ground plane so the table is grounded (and casts
     # contact shadows) rather than floating in the HDRI void.
-    _materials.setup_world_hdri(job["hdri"], job.get("world_strength", 0.7))
+    _materials.setup_world_hdri(
+        job["hdri"], job.get("world_strength", 1.0), job.get("hdri_rotation", 0.0)
+    )
     if job.get("ground", True):
         floor_z = _scene_min_z(mapping.values())
         _lighting.add_ground_plane(floor_z)
