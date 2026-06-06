@@ -249,3 +249,8 @@ generated_scenes/
 warp_cache/
 *.ptx
 *.cubin
+
+# Large fetched render assets (CC0 textures + HDRIs) — re-download via
+# resources/fetch_assets.sh instead of committing the binaries.
+resources/textures/
+resources/hdri/*_4k.hdr
