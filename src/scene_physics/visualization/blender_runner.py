@@ -95,6 +95,14 @@ def run_render_scene(job: dict) -> None:
         run_script("render_scene.py", [str(job_path)], timeout=1800)
 
 
+def run_render_views(job: dict) -> None:
+    """Drive blender/render_views.py (multi-camera beauty render) with a job dict."""
+    with tempfile.TemporaryDirectory() as d:
+        job_path = Path(d) / "job.json"
+        job_path.write_text(json.dumps(job))
+        run_script("render_views.py", [str(job_path)], timeout=1800)
+
+
 def render_boxes_mask(intr, boxes: list[dict]) -> np.ndarray:
     """Render boxes in Blender; return the (H,W) bool silhouette (alpha>0)."""
     import imageio.v2 as imageio
