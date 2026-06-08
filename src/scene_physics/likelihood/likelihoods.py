@@ -16,6 +16,9 @@ from scene_physics.likelihood.likelihoods_functions import (
     compute_likelihood_score,
     compute_likelihood_score_batch,
 )
+from scene_physics.properties.structs import Object_Collection
+from scene_physics.properties.shapes import Dynamic
+from scene_physics.configs.likely import *
 
 # PHYSICS SIMULATION
 DEFAULT_SOLVER_ITERATIONS = 16
@@ -109,6 +112,56 @@ class ParallelPhysicsLikelihood:
             rendered_xyz_batch=clouds,
         )
         return np.asarray(scores) - self.baseline_score
+    
+    def get_penetration(self, scene, object_collection : Object_Collection):
+        # TODO build sampler
+
+        return 1
+
+
+    def run_simulation(self, scene):
+        state_0, state_1 = self._state_0, self._state_1
+        state_0.assign(scene)
+        state_1.assign(scene)
+
+        for frame in range(self.frames):
+            for _ in range(self.substeps):
+                state_0.clear_forces()
+                contacts = self.model.collide(state_0)
+                self.solver.step(
+                    state_0, state_1, self.control, contacts, self.sub_dt,
+                )
+                state_0, state_1 = state_1, state_0
+
+        return state_0
+
+
+    def physics(self, scene, object_collection : Object_Collection):
+        # Get still render
+        initial_score = self.still(scene)
+
+        # Get initial contacts
+        penetration = self.get_penetration(scene, object_collection)
+
+        # Get initial positions (world, body, 7)
+        initial_pos = [
+            obj.get_positions(scene)
+            for obj in 
+            object_collection.objects.values()
+            if isinstance(obj, Dynamic)
+        ]
+
+        # Run Physics Simulation
+        final_scene = self.run_simulation(scene)
+
+        # Get post simulation positions
+        final_pos = [
+            obj.get_positions(final_scene)
+            for obj in
+            object_collection.objects.values()
+            if isinstance(obj, Dynamic)
+        ]
+
 
     def physics(self, scene):
         """Forward-sim, render snapshots, return (num_worlds,) avg scores - baseline.

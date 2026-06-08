@@ -282,3 +282,35 @@ Don't import these from new code. The `scene_physics.sampling` package's `__init
 - `proposals.py::Proposer.initial_proposal` — uses `np.tile` (was `np.repeat`, which flattened).
 - `proposals.py::Proposer.propose` — `self.rng.choice` resamples row indices then gathers, instead of flattening the 2-D array.
 - Unused imports cleaned across `material.py`, `kernels/image_process.py`, `visualization/scene.py`, `proposals.py`, `shapes.py`.
+
+---
+
+## Design Note: Composite Likelihood + Volume-Based Penetration Term (planned, not yet implemented)
+
+**Goal.** Today `ParallelPhysicsLikelihood` returns a single purely-visual `(num_worlds,)` score (3DP3 point-cloud match − baseline). The plan is to make it a **composite likelihood** — a weighted product of "expert" factors, summed in log space:
+
+> log L_c(world) = β_v · log L_visual(world) + β_p · log L_phys(world)
+
+Each factor is its own `(num_worlds,)` vector, so the composite is just a weighted sum of vectors. Refactor so components are a list (visual, physics, …) rather than hard-wired — this also makes visual-only vs composite a trivial ablation. The physics factor `log L_phys` is a **physical-plausibility expert**: a config with objects interpenetrating at t=0 is impossible and should be down-weighted.
+
+**Why a *volume* metric (not a contact count / gap).** The dataset is built around **resting contact** — a visible object is *supposed* to touch the hidden target — so correct configs sit at ~0 gap. A binary "any contact ⇒ reject" gate therefore penalizes the *correct* answer; we need a penetration **magnitude with a tolerance band** that reads ~0 for resting and grows with real overlap. `model.collide`'s gap field is unreliable in this rig (see data_gen note: `dot(normal, p1−p0)` reads 0–5 cm regardless of true gap) and its contact *count* over-reports at the default 0.1 m margin, so neither gives a trustworthy magnitude. An *exact* mesh/polytope intersection volume is the right quantity but is too slow / robustness-fragile to run per-world per-iteration.
+
+**The method: sampled (Monte-Carlo) interpenetration volume.** Approximate the overlap volume between each object pair by point-sampling instead of computing it exactly. GPU-parallel, smooth, magnitude-bearing, and cheap (rigid transforms + a max-reduce); sub-ms–low-ms at `num_worlds × ~15 pairs × K~1e3` on an H100.
+
+General algorithm (per importance-sampling evaluation):
+1. **Precompute once per object** (independent of pose): K sample points filling the object's volume, expressed in the object's body frame. Convex hulls (the settle/USD geometry) make this easy: sample the hull AABB, keep points inside the hull. Store `points_body[obj]` `(K, 3)` and `vol[obj]`.
+2. **Per world, per ordered pair (A, B)** of dynamic bodies (skip non-colliding pairs; optionally include body-vs-table):
+   - Transform A's points to world by A's `body_q`, then into B's body frame by `inv(body_q[B])`.
+   - **Inside-B test** (convex hull): `inside = all_i(nᵢ · x − dᵢ ≤ 0)` over B's face halfplanes — a matmul + max-reduce. (Non-convex objects: use a precomputed SDF / occupancy grid lookup instead.)
+   - `pen_vol(A,B) ≈ mean(inside) · vol(A)`. Symmetrize or just sum over ordered pairs.
+3. **Per-world penetration** `V(world) = Σ_pairs pen_vol`. Vectorize the whole thing over `(worlds, pairs, points)` — no Python loop over worlds.
+4. **Tolerance band + factor.** Subtract a small allowance for legitimate resting contact, then turn into a Gibbs/Boltzmann factor:
+   > log L_phys(world) = −β_p · max(0, V(world) − V_tol)
+   `V_tol` absorbs the thin resting overlap; `β_p` sets how hard penetration is penalized. (This is a product-of-experts: penetration treated as an energy, `exp(−βE)`.)
+
+**Caveats to resolve when implementing.**
+- **Rank resampler flattens magnitudes.** `proposals.py::propose` weights by *rank*, not `exp(score)`, so a smooth volume penalty only bites when it changes ordering. To use the magnitude as intended, also switch `propose()` to softmax/`exp(score)` weights; otherwise the volume term degenerates toward a gate.
+- **Convex-hull sampling is an over-estimate** vs the true (possibly concave) mesh, but it matches the geometry physics already uses, and the penalty only needs to be monotone in real overlap.
+- **Per-world bucketing is *not* needed for the sampled-volume path** (you index bodies directly via `Body.allocs[w]`), unlike the `model.collide` route, which pools all worlds into one flat contact buffer with a single global count.
+- **`V_tol` calibration**: set it from the typical resting-contact overlap of an accepted dataset scene (the stack probe) so true rests score ~0 and only excess interpenetration is penalized.
+- **Alternative considered**: reuse the XPBD solver — step once and measure the correction ‖Δq‖ (overlap → large correction, rest → tiny). Free, but inherits the solver non-determinism logged in the max-likelihood-wander note, so the sampled-volume metric is preferred as the deterministic signal.

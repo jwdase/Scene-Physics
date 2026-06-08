@@ -65,6 +65,9 @@ class Dynamic(Body):
         scene.body_q = self._numpy_to_warp(proposals)
         return scene
     
+    def get_positions(self, state):
+        return self._warp_to_numpy(state)[self.allocs]
+    
     def _update_best(self, likelihood, positions):
         max_likelihood = likelihood.max()
         max_index = likelihood.argmax()

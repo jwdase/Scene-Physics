@@ -114,7 +114,7 @@ def run_simulation_save(scene_usd, output_path):
     gl_viewer.close()
 
 
-def run_simulation(scene_usd, output_path):
+def run_simulation(scene_usd, _):
     builder = newton.ModelBuilder(up_axis=newton.Axis.Z, gravity=GRAVITY)
     builder.add_ground_plane()
     builder.add_usd(scene_usd, skip_mesh_approximation=True)

@@ -101,7 +101,17 @@ def build_textured_material(tex: dict) -> bpy.types.Material:
     rough = _box_image(
         nt, mapping, os.path.join(folder, f"{prefix}_Roughness.jpg"), True, blend
     )
-    nt.links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
+    rough_floor = tex.get("rough_floor")
+    if rough_floor:
+        # Clamp the roughness-map lows up to `rough_floor` (keeping the highs), so a
+        # near-mirror polished patch can't blow out into a wet-plastic hotspot.
+        clamp = nt.nodes.new("ShaderNodeMath")
+        clamp.operation = "MAXIMUM"
+        clamp.inputs[1].default_value = rough_floor
+        nt.links.new(rough.outputs["Color"], clamp.inputs[0])
+        nt.links.new(clamp.outputs["Value"], bsdf.inputs["Roughness"])
+    else:
+        nt.links.new(rough.outputs["Color"], bsdf.inputs["Roughness"])
     disp = _box_image(
         nt, mapping, os.path.join(folder, f"{prefix}_Displacement.jpg"), True, blend
     )

@@ -122,6 +122,7 @@ def main() -> None:
     if job.get("ground", True):
         floor_z = _scene_min_z(mapping.values())
         _lighting.add_ground_plane(floor_z)
+        _lighting.add_back_wall(floor_z)  # near wall standing on the floor (aligned)
     if job.get("studio_lights", True):
         _lighting.setup_studio_lighting()
     setup_camera(job["intrinsics"])
