@@ -45,6 +45,12 @@ def build_worlds(scene_usd, scene_makeup : Scene_Makeup):
 def run_importance_sampling(scene_usd, prior_json, truth_json, intrinsics : CameraIntrinsics, scene_makeup : Scene_Makeup, save_dir : str, iterations=20):
     base_rng = np.random.default_rng(seed=42)
 
+    # Step -1: Print States
+    print("======")
+    print(f"Scene: {scene_usd}")
+    print(f"Number of Worlds: {NUM_WORLDS}")
+    print(f"Number of Epochs: {NUM_EPOCHS}")
+
     # Step 0: Plot Target Scene
     plot_target_scene(truth_json, save_dir)
 
