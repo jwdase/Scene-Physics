@@ -10,6 +10,7 @@ and the baseline score.
 import jax
 import numpy as np
 import warp as wp
+from scipy.stats import rankdata
 from newton.solvers import SolverXPBD
 
 from scene_physics.likelihood.likelihoods_functions import (
@@ -100,10 +101,6 @@ class ParallelPhysicsLikelihood:
         # Reusable state for replaying snapshots through the camera
         self._render_state = self.model.state()
 
-    ###############################
-    ##       SCORING            ###
-    ###############################
-
     def still(self, scene):
         """Render proposals as-placed, return (num_worlds,) scores - baseline."""
         clouds = self.camera.render(scene)
@@ -113,11 +110,10 @@ class ParallelPhysicsLikelihood:
         )
         return np.asarray(scores) - self.baseline_score
     
-    def get_penetration(self, scene, object_collection : Object_Collection):
+    def _get_penetration(self, scene, object_collection : Object_Collection):
         # TODO build sampler
 
-        return 1
-
+        return np.zeros(self.num_worlds)
 
     def run_simulation(self, scene):
         state_0, state_1 = self._state_0, self._state_1
@@ -135,72 +131,66 @@ class ParallelPhysicsLikelihood:
 
         return state_0
 
-
     def physics(self, scene, object_collection : Object_Collection):
-        # Get still render
-        initial_score = self.still(scene)
+        """Generates likelihood for each world preserving order"""
+        get_rank = lambda a : rankdata(a, method="average") - 1.0
 
-        # Get initial contacts
-        penetration = self.get_penetration(scene, object_collection)
+        # Get still render: Want HIGH simularity
+        sim = get_rank(self.still(scene))
 
-        # Get initial positions (world, body, 7)
-        initial_pos = [
+        # Get initial contacts: Want LOW contacts
+        pen = get_rank(-self._get_penetration(scene, object_collection)) # Want LOW 
+
+        # Get physics results
+        disp, rot = self._get_physics_results(scene, object_collection)
+        disp = get_rank(-disp)
+        rot = get_rank(-rot)
+
+        return (
+            LAMBDA_POINT * sim / sim.sum() +
+            LAMBDA_PENETRATION * pen / pen.sum() +
+            LAMBDA_MOVEMENT * disp / disp.sum() +
+            LAMBDA_ROT * rot / rot.sum()
+            )
+
+
+    def _get_physics_results(self, scene, object_collection : Object_Collection):
+        """ Run's physics scene and calculates final displacement"""
+        # Get pre_physics positions (world, body, 7)
+        initial_q = np.stack([
             obj.get_positions(scene)
             for obj in 
             object_collection.objects.values()
             if isinstance(obj, Dynamic)
-        ]
+        ], axis=1)
 
         # Run Physics Simulation
         final_scene = self.run_simulation(scene)
 
-        # Get post simulation positions
-        final_pos = [
+        # Get post simulation positions (world, body, 7)
+        final_q = np.stack([
             obj.get_positions(final_scene)
             for obj in
             object_collection.objects.values()
             if isinstance(obj, Dynamic)
-        ]
+        ], axis=1)
 
+        return (
+            self._total_displacement(initial_q, final_q),
+            self._total_rotation(initial_q, final_q)
+        )
 
-    def physics(self, scene):
-        """Forward-sim, render snapshots, return (num_worlds,) avg scores - baseline.
+    def _total_displacement(self, initial, final):
+        displacement = np.abs(initial[..., :3] - final[..., :3]) # (world, body, 3)
+        l2_distance = np.linalg.norm(displacement, axis=-1) # (world, body)
 
-        Worlds whose initial proposal placement causes a collision still go
-        through the (batched) solver; their snapshots are scored normally.
-        """
-        state_0, state_1 = self._state_0, self._state_1
-        state_0.assign(scene)
-        state_1.assign(scene)
+        return l2_distance.sum(axis=-1) # (num_worlds,)
 
-        # Phase 1: forward physics. Each frame runs `substeps` solver steps of
-        # length `sub_dt = dt / substeps`; snapshot body_q every eval_every frames.
-        eval_idx = 0
-        for frame in range(self.frames):
-            for _ in range(self.substeps):
-                state_0.clear_forces()
-                contacts = self.model.collide(state_0)
-                self.solver.step(
-                    state_0, state_1, self.control, contacts, self.sub_dt,
-                )
-                state_0, state_1 = state_1, state_0
+    def _total_rotation(self, initial, final):
+        # Rotational distance between two quaternians is <q1, q2> = cos(\theta)
+        # \theta = 2 * arccos(|<q1, q2>|)
 
-            if (frame + 1) % self.eval_every == 0:
-                # state_0 holds the most recent post-step result after the swap.
-                self._eval_states[eval_idx] = state_0.body_q.numpy()
-                eval_idx += 1
+        dot = np.abs(np.sum(initial[..., 3:7] * final[..., 3:7], axis=-1))  # (world, body)
+        theta = 2.0 * np.arccos(np.clip(dot, 0.0, 1.0))
 
-        # Phase 2: replay each snapshot through the camera, accumulate scores.
-        total_scores = np.zeros(self.num_worlds)
-        for i in range(eval_idx):
-            self._render_state.body_q = wp.array(
-                self._eval_states[i], dtype=wp.transformf, device="cuda"
-            )
-            clouds = self.camera.render(self._render_state)
-            scores = compute_likelihood_score_batch(
-                observed_xyz=self.target_point_cloud,
-                rendered_xyz_batch=clouds,
-            )
-            total_scores += np.asarray(scores)
-
-        return (total_scores / eval_idx) - self.baseline_score
+        return theta.sum(axis=-1)  # (world,)

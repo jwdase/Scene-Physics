@@ -137,15 +137,12 @@ class XYProposer(Proposer):
 
         return self._apply_bounds(proposals)    
     
-    def propose(self, positions, likelihood):
+    def propose(self, positions, weights):
         proposals = np.zeros((self.num_worlds, 7))
 
         # Keep Top Likelihood - Go into allocs to find top for that object
-        proposals[0, :] = positions[np.argmax(likelihood)]
+        proposals[0, :] = positions[np.argmax(weights)]
         
-        ranks = np.argsort(np.argsort(likelihood)) + 1  # 1-based so worst != 0
-        weights = ranks / ranks.sum()
-
         idx = self.rng.choice(self.num_worlds, size=self.num_worlds-1, p=weights, replace=True)
         proposals[1:, :] = positions[idx]
 
